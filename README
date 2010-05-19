@@ -1,0 +1,81 @@
+git_http_backend.py - Git "Smart HTTP" (git-http-backend) server implementation
+ in Python for WSGI server architecture.
+===============================================
+
+
+About git-http-backend:
+
+A special "Smart HTTP" git-specific RPC implementation allowing one to push data to remote
+repo and pull data from remote repo in a very efficient way, over regular HTTP (using POSTs and GETs)
+
+"Smart HTTP" RPC support was introduced in git client starting with v.1.6.6.
+
+The essense of "Smart HTTP" RPC is that it's a transport for communication between client
+and server's git-upload-pack and git-receive-pack - the commands ran on server when client,
+respectively, "pulls" and "pushes."
+
+"Screen-scraped" raw outputs of the commands are gzipped and are sent around as HTTP 
+POSTs / replies. Some RPC-specific control strings and HTTP headers are introduced into
+communication stream to signal to git client that server supports "Smart HTTP"
+Client signals to the server that it supports "Smart HTTP" by talking over HTTP POST (vs. GET)
+
+PRC supports Basic Auth over HTTP and rudimentary, server-side (not file-system-side) ACL features.
+
+There is no published documentation on the RPC protocol. Per direct, personal inquiry with the
+author of the protocol and code I confirmed that the only published "documentaion" 
+is the comment-less C code in the Git repo proper.
+
+
+About this project:
+
+The project is almost a translation of similar effort done in Ruby, 
+called Grack - http://github.com/schacon/grack by Scott Chacon <schacon@gmail.com> et al.
+
+This project aims to supplement the C-based git-http-backend CGI handler
+distributed in mainline Git with a Python WSGI-compatible application.
+
+The default git-http-backend only runs under CGI on Apache. Furthermore, Git 
+packagesbinaries containing http-backend.cgi are not availableon Windows 
+(as of May 18, 2010. Checked in Cygwin).
+
+Python, WSGI-based git-http-backend implementation may run on practically any server,
+on almost any OS. Look for server-specific WSGI modules or wrap WSGI app into a Fast/S/CGI.
+At the most basic level, the application can be run against Python's built-in WSGI server. 
+
+Since there is no published documentation on Git's "Smart HTTP" RPC protocol, this
+implementation is largely a guess of how it works based on my reading of original C and
+Grack's Ruby code.
+
+Dependencies
+========================
+* Python 2.6 (Developed against 2.6, 2.5+ might work, but never tested.)
+* Git (client) 1.7.x +
+
+Installation
+========================
+See Examples folter.
+
+License
+========================
+	(The MIT License)
+
+	Copyright (c) 2010 Daniel Dotsenko <dotsa@hotmail.com>
+
+	Permission is hereby granted, free of charge, to any person obtaining
+	a copy of this software and associated documentation files (the
+	'Software'), to deal in the Software without restriction, including
+	without limitation the rights to use, copy, modify, merge, publish,
+	distribute, sublicense, and/or sell copies of the Software, and to
+	permit persons to whom the Software is furnished to do so, subject to
+	the following conditions:
+
+	The above copyright notice and this permission notice shall be
+	included in all copies or substantial portions of the Software.
+
+	THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND,
+	EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+	MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+	IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+	CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+	TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+	SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
