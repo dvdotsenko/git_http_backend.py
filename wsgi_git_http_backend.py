@@ -23,7 +23,7 @@ You should have received a copy of the GNU Lesser General Public License
 along with git_http_backend.py Project.  If not, see <http://www.gnu.org/licenses/>.
 '''
 
-def get_WSGI_app(path_prefix = '.', repo_uri_marker = ''):
+def assemble_WSGI_app(path_prefix = '.', repo_uri_marker = ''):
 	'''
 	Assembles basic WSGI-compatible application providing functionality of git-http-backend.
 
@@ -65,10 +65,9 @@ def get_WSGI_app(path_prefix = '.', repo_uri_marker = ''):
 		marker_regex = '^(?P<decorative_path>.*?)(?:/'+ repo_uri_marker.decode('utf8') + '/)'
 	else:
 		marker_regex = ''
-	selector.add(marker_regex + '(?P<working_path>.*)/git-(?P<git_command>.+)$', {'POST':git_rpc_handler}) # regex is "greedy" it will skip all cases of /git- until it finds last one.
-	selector.add(marker_regex + '(?P<working_path>.*)/info/refs$', {'GET':git_inforefs_handler})
-	selector.add(marker_regex + '(?P<working_path>.*)$', {'GET':generic_handler})
-	# selector.add('^.*$', {'GET':simple_server.demo_app})
+	selector.add(marker_regex + '(?P<working_path>.*)/info/refs$', GET = git_inforefs_handler)
+	selector.add(marker_regex + '(?P<working_path>.*)/git-(?P<git_command>.+)$', POST = git_rpc_handler) # regex is "greedy" it will skip all cases of /git- until it finds last one.
+	selector.add(marker_regex + '(?P<working_path>.*)$', GET = generic_handler)
 	# selector.add('^.*$', {'GET':generic_handler}) # if none of the above yield anything, serve everything.
 
 	return selector
@@ -130,10 +129,10 @@ if __name__ == "__main__":
 	import os
 
 	command_options = get_cmd_options({
-			'path_prefix' : r'.',
+			'path_prefix' : '.',
 			'repo_uri_marker' : '',
 			'port' : '80'
-		}) # this is where defaults are defined.
+		}) # feeding in our defaults
 
 	path_prefix = os.path.abspath( command_options['path_prefix'] )
 
@@ -146,14 +145,15 @@ if __name__ == "__main__":
 
 	# default Python's WSGI server. Replace with your choice of WSGI server
 	from wsgiref import simple_server
-	#from wsgiref.validate import validator
-	## use as wsgiapp = validator(app)
+#	app = assemble_WSGI_app(
+#			path_prefix = path_prefix,
+#			repo_uri_marker = command_options['repo_uri_marker']
+#		)
 
-	app = get_WSGI_app(
-			path_prefix = path_prefix,
-			repo_uri_marker = command_options['repo_uri_marker']
-		)
-	# app = simple_server.demo_app
+	## Testing bits:
+	app = simple_server.demo_app
+	#from wsgiref.validate import validator
+	## use as: app = validator(app)
 
 	httpd = simple_server.make_server('',int(command_options['port']),app)
 	try:

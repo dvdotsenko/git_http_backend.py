@@ -23,6 +23,7 @@ Boston, MA  02110-1301, USA.
 
 Luke Arno can be found at http://lukearno.com/
 """
+import os.path
 
 import mimetypes
 import email.utils
@@ -92,17 +93,11 @@ class StaticContentServer(object):
 		else:
 			path_info = environ.get('PATH_INFO', '').decode('utf8') # needs to be unicode in order to be able to look up non-latin file names.
 
-		# sanitizing the path:
-		# turns garbage like this: r'//qwre/asdf/..*/*/*///.././../qwer/./..//../../.././//yuioghkj/../wrt.sdaf'
-		# into something like this: /../../wrt.sdaf
-		path_info = urlparse.urljoin(u'/', re.sub('//+','/',path_info.strip('/')))
-		# at this point all relative links should be resolved. 
-		# If they are still there, we have someone playing with URIs.
-		if path_info.startswith('/..'):
-			return self.not_found(environ, start_response)
-
 		# this, i hope, safely turns the relative path into OS-specific, absolute.
 		full_path = os.path.abspath(os.path.join(self.root, path_info.strip('/')))
+		if not os.path.isfile(full_path):
+			return self.not_found(environ, start_response)
+
 		content_type = mimetypes.guess_type(full_path)[0] or 'application/octet-stream'
 		# 	"Content-Transfer-Encoding: binary"
 

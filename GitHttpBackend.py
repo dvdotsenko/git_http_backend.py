@@ -58,27 +58,34 @@ class RPCHandler():
 class InfoRefsHandler():
 	'''
 	Implementation of a WSGI handler (app) specifically capable of responding
-	to git-http-backend (Git Smart HTTP) RPC calls sent over HTTP POST.
+	to git-http-backend (Git Smart HTTP) /info/refs call over HTTP GET.
 
-	This is a layer that responds to HTTP POSTs to URIs like:
-		/repo_folder_name/git-upload-pack?service=upload-pack (or same for receive-pack)
+	This is the fist step in the RPC dialog. We have to reply with right content
+	to show to Git client that we are an "intelligent" server.
 
-	This is a second step in the RPC dialog. Another handler for HTTP GETs to
-	/repo_folder_name/info/refs (as implemented in a separate WSGI handler below)
-	must reply in a specific way in order for the Git client to decide to talk here.
+	The "right" content is special header and custom top 2 rows of data in the response.
 	'''
 	def __init__(self, repo_fs_path):
 		self.path_prefix = repo_fs_path
 
 	def __call__(self, environ, start_response):
-		"""
-		WSGI Response producer for HTTP POST Git Smart HTTP requests.
-
-		Reads commands and data from HTTP POST's body.
-
-		returns an iterator obj with contents of git command's response to stdout
-		"""
+		"""WSGI Response producer for HTTP GET Git Smart HTTP /info/refs request."""
 		# TODO: Handle 100-Continue here
+
+		command = r'git receive-pack --stateless-rpc --advertise-refs "/cygdrive/c/tmp/testgitrepo.git"'
+		commandProcess = self.get_command_subprocess(command)
+		out, err = commandProcess.communicate()
+
+		method = 'upload-pack'
+		if not err:
+			print 'serving good.'
+			start_response("200 Ok", [('Content-type', 'application/x-git-%s-advertisement' % method)])
+			advert = '# service=git-%s\n' % upload-pack
+			return [
+				hex(len(advert)+4)[2:].rjust(4,'0') + advert ,
+				'0000\n',
+				out
+				]
 
 		start_response("200 Ok", [('Content-type', 'text/plain')])
 		return ['']
