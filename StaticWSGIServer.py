@@ -82,21 +82,31 @@ class StaticContentServer(object):
 		if environ['REQUEST_METHOD'] not in ('GET', 'HEAD', 'POST'):
 			customHeaders = [('Allow', 'GET, HEAD, POST')]
 			return self.method_not_allowed(environ, start_response, customHeaders)
-		path_info = environ.get('PATH_INFO', '').decode('utf8') # needs to be unicode in order to be able to look up non-latin file names.
+
+		# this code is here specifically to deal with path's inserted by
+		# WSGISelector middleware. It adds to environ. If this fails, it means
+		# WSGISelector module was not used and we will fall back to PATH_INFO
+		selector_vars = environ.get('selector.vars',{})
+		if 'working_path' in selector_vars: # working_path is custom key used for git-http-backend. May conflict.
+			path_info = selector_vars['working_path'].decode('utf8')
+		else:
+			path_info = environ.get('PATH_INFO', '').decode('utf8') # needs to be unicode in order to be able to look up non-latin file names.
+
 		# sanitizing the path:
 		# turns garbage like this: r'//qwre/asdf/..*/*/*///.././../qwer/./..//../../.././//yuioghkj/../wrt.sdaf'
-		# into something like this: /wrt.sdaf
+		# into something like this: /../../wrt.sdaf
 		path_info = urlparse.urljoin(u'/', re.sub('//+','/',path_info.strip('/')))
 		# at this point all relative links should be resolved. 
 		# If they are still there, we have someone playing with URIs.
-		if path_info.find('/..') > -1:
-			self.not_found(environ, start_response)
+		if path_info.startswith('/..'):
+			return self.not_found(environ, start_response)
+
 		# this, i hope, safely turns the relative path into OS-specific, absolute.
 		full_path = os.path.abspath(os.path.join(self.root, path_info.strip('/')))
 		content_type = mimetypes.guess_type(full_path)[0] or 'application/octet-stream'
 		# 	"Content-Transfer-Encoding: binary"
 
-		print "local path is %s" % full_path
+		# print "local path is %s\n" % full_path
 #		try:
 		if True:
 			etag, last_modified = self._file_stats(full_path)
