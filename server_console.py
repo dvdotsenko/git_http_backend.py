@@ -1,3 +1,4 @@
+# -*- coding: utf8 -*-
 #!/usr/bin/env python
 '''
 Basic WSGI-based server designed to act as a replaceement for 
@@ -23,54 +24,7 @@ You should have received a copy of the GNU Lesser General Public License
 along with git_http_backend.py Project.  If not, see <http://www.gnu.org/licenses/>.
 '''
 
-def assemble_WSGI_app(path_prefix = '.', repo_uri_marker = ''):
-	'''
-	Assembles basic WSGI-compatible application providing functionality of git-http-backend.
-
-	path_prefix (Defaults to '.' = "current" directory)
-		The path to the folder that will be the root of served files. Accepts relative paths.
-
-	repo_uri_marker (Defaults to '')
-		Acts as a "virtual folder" separator between decorative URI portion and
-		the actual (relative to path_prefix) path that will be appended to
-		path_prefix and used for pulling an actual file.
-
-		the URI does not have to start with contents of repo_uri_marker. It can
-		be preceeded by any number of "virtual" folders. For --repo_uri_marker 'my'
-		all of these will take you to the same repo:
-			http://localhost/my/HEAD
-			http://localhost/admysf/mylar/zxmy/my/HEAD
-		This WSGI hanlder will cut and rebase the URI when it's time to read from file system.
-
-		Default of '' means that no cutting marker is used, and whole URI after FQDN is
-		used to find file relative to path_prefix.
-
-	returns WSGI application instance.
-	'''
-
-	# local modules
-	from StaticWSGIServer import StaticContentServer
-	from WSGISelector import Selector as WSGISelector
-	from GitHttpBackend import RPCHandler as GitRPCHandler, InfoRefsHandler as GitInfoRefsHandler
-
-	git_rpc_handler = GitRPCHandler(path_prefix)
-	git_inforefs_handler = GitInfoRefsHandler(path_prefix)
-	generic_handler = StaticContentServer(path_prefix)
-
-	# Test code for Selector middleware.
-	selector = WSGISelector()
-	selector.parser = lambda x: x
-
-	if repo_uri_marker:
-		marker_regex = '^(?P<decorative_path>.*?)(?:/'+ repo_uri_marker.decode('utf8') + '/)'
-	else:
-		marker_regex = ''
-	selector.add(marker_regex + '(?P<working_path>.*)/info/refs$', GET = git_inforefs_handler)
-	selector.add(marker_regex + '(?P<working_path>.*)/git-(?P<git_command>.+)$', POST = git_rpc_handler) # regex is "greedy" it will skip all cases of /git- until it finds last one.
-	selector.add(marker_regex + '(?P<working_path>.*)$', GET = generic_handler)
-	# selector.add('^.*$', {'GET':generic_handler}) # if none of the above yield anything, serve everything.
-
-	return selector
+import GitHttpBackend
 
 def get_cmd_options(options = {}):
 	'''
@@ -143,20 +97,20 @@ if __name__ == "__main__":
 			exec_path = os.path.dirname(__file__)
 	os.chdir(os.path.abspath(exec_path))
 
-	# default Python's WSGI server. Replace with your choice of WSGI server
-	from wsgiref import simple_server
-#	app = assemble_WSGI_app(
-#			path_prefix = path_prefix,
-#			repo_uri_marker = command_options['repo_uri_marker']
-#		)
+	app = GitHttpBackend.assemble_WSGI_git_app(
+			path_prefix = path_prefix,
+			repo_uri_marker = command_options['repo_uri_marker']
+		)
 
 	## Testing bits:
-	app = simple_server.demo_app
+	# app = simple_server.demo_app
 	#from wsgiref.validate import validator
 	## use as: app = validator(app)
 
+	# default Python's WSGI server. Replace with your choice of WSGI server
+	from wsgiref import simple_server
+	# app = simple_server.demo_app
 	httpd = simple_server.make_server('',int(command_options['port']),app)
-	try:
-		httpd.serve_forever()
-	except KeyboardInterrupt:
-		pass
+	httpd.serve_forever()
+#	except KeyboardInterrupt:
+#		pass

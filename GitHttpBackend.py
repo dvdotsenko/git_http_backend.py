@@ -1,4 +1,5 @@
-#! /usr/bin/python
+# -*- coding: utf8 -*-
+#!/usr/bin/env python
 '''
 Module provides WSGI-based methods for handling HTTP Get and Post requests that
 are specific only to git-http-backend's Smart HTTP protocol.
@@ -149,5 +150,56 @@ def process_GET(self, environ, start_response):
 		method = environ.get('REQUEST_METHOD','GET')
 		return self.handlerfn.get(method, self.process_unsupported)(environ, start_response)
 
-if __name__ == "__main__":
-	print "Attach class instances as WSGI URI handlers.\nCan't do anything by myself."
+def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = ''):
+	'''
+	Assembles basic WSGI-compatible application providing functionality of git-http-backend.
+
+	path_prefix (Defaults to '.' = "current" directory)
+		The path to the folder that will be the root of served files. Accepts relative paths.
+
+	repo_uri_marker (Defaults to '')
+		Acts as a "virtual folder" separator between decorative URI portion and
+		the actual (relative to path_prefix) path that will be appended to
+		path_prefix and used for pulling an actual file.
+
+		the URI does not have to start with contents of repo_uri_marker. It can
+		be preceeded by any number of "virtual" folders. For --repo_uri_marker 'my'
+		all of these will take you to the same repo:
+			http://localhost/my/HEAD
+			http://localhost/admysf/mylar/zxmy/my/HEAD
+		This WSGI hanlder will cut and rebase the URI when it's time to read from file system.
+
+		Default of '' means that no cutting marker is used, and whole URI after FQDN is
+		used to find file relative to path_prefix.
+
+	returns WSGI application instance.
+	'''
+
+	# local modules
+	from StaticWSGIServer import StaticWSGIServer
+	from WSGIHandlerSelector import WSGIHandlerSelector
+	from WSGICannedHTTPHandlers import CannedHTTPHandlers
+	# from GitHttpBackend import RPCHandler as GitRPCHandler, InfoRefsHandler as GitInfoRefsHandler
+
+
+	canned_handlers = CannedHTTPHandlers()
+	selector = WSGIHandlerSelector(canned_handlers = canned_handlers)
+	generic_handler = StaticContentServer(path_prefix, canned_handlers = canned_handlers)
+#	git_inforefs_handler = GitInfoRefsHandler(path_prefix)
+#	git_rpc_handler = GitRPCHandler(path_prefix)
+
+	## TESTING SETTINGS:
+	# from wsgiref import simple_server
+	# app = simple_server.demo_app
+	# selector.add('^.*$',app)
+
+	if repo_uri_marker:
+		marker_regex = '^(?P<decorative_path>.*?)(?:/'+ repo_uri_marker.decode('utf8') + '/)'
+	else:
+		marker_regex = ''
+#	selector.add(marker_regex + '(?P<working_path>.*)/info/refs$', GET = git_inforefs_handler, HEAD = git_inforefs_handler)
+#	selector.add(marker_regex + '(?P<working_path>.*)/git-(?P<git_command>.+)$', POST = git_rpc_handler) # regex is "greedy" it will skip all cases of /git- until it finds last one.
+	selector.add(marker_regex + '(?P<working_path>.*)$', GET = generic_handler, HEAD = generic_handler)
+	# selector.add('^.*$', GET = generic_handler) # if none of the above yield anything, serve everything.
+
+	return selector
