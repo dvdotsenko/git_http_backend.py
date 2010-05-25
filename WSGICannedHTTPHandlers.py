@@ -33,10 +33,17 @@ class CannedHTTPHandlers(object):
 		'not_modified': '304 Not Modified',
 		'301': '301 Moved Permanently',
 		'moved': '301 Moved Permanently',
+		'400':'400 Bad request',
+		'bad_request':'400 Bad request',
+		'401':'401 Access denied',
+		'access_denied':'401 Access denied',
+		'401.4': '401.4 Authorization failed by filter',
 		'404': "404 Not Found",
 		'not_found': "404 Not Found",
 		'405': "405 Method Not Allowed",
 		'method_not_allowed': "405 Method Not Allowed",
+		'417':'417 Execution failed',
+		'execution_failed':'417 Execution failed',
 		'200': "200 OK",
 	}
 

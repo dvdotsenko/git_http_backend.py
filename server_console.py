@@ -111,6 +111,7 @@ if __name__ == "__main__":
 	from wsgiref import simple_server
 	# app = simple_server.demo_app
 	httpd = simple_server.make_server('',int(command_options['port']),app)
-	httpd.serve_forever()
-#	except KeyboardInterrupt:
-#		pass
+	try:
+		httpd.serve_forever()
+	except KeyboardInterrupt:
+		pass

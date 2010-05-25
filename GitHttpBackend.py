@@ -24,11 +24,119 @@ GNU Lesser General Public License for more details.
 You should have received a copy of the GNU Lesser General Public License
 along with git_http_backend.py Project.  If not, see <http://www.gnu.org/licenses/>.
 '''
+import os.path
+import urlparse
+from cStringIO import StringIO
+import subprocess
 
 __version__=(1,7,0,4) # the number has no significance for this code's functionality.
 # The number means "I was looking at sources of that version of Git while coding"
 
-class RPCHandler():
+### Helper functions ###
+def has_access(**kw):
+	return True
+
+def get_command_subprocess(commandline):
+	"""
+	 commandline - may be a string, or a list.
+	 Returns:
+	 Popen object with .communicate(), .stdin, .stdout, .stderr - file-like
+	"""
+
+	# CYGWIN likes to complain about non-POSYX paths unless the following is in the enviro:
+	#  set CYGWIN=nodosfilewarning
+	# Thus, additonal arguments to consider # cwd = workingpath, universal_newlines = True, custom environ.
+	
+	return subprocess.Popen(commandline, bufsize = 1,
+		stdin = subprocess.PIPE, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
+
+
+def command_output(cmd, ioObj = StringIO()):
+	'''
+	Returns obj as IO and ExecutionError as boolean.
+	'''
+
+	# print "This is the command:\n%s\n" % cmd
+
+#	try:
+	if True:
+		c = subprocess.Popen(cmd, bufsize = 1, stdin = subprocess.PIPE, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
+#	except:
+#		return ioObj, True
+
+	while c.returncode == None:
+		ioObj.write(c.communicate()[0])
+	ioObj.write(c.communicate()[0])
+	return ioObj, False
+
+### Git-Specific Request Handlers ###
+
+class GitInfoRefsHandler(object):
+	'''
+	Implementation of a WSGI handler (app) specifically capable of responding
+	to git-http-backend (Git Smart HTTP) /info/refs call over HTTP GET.
+
+	This is the fist step in the RPC dialog. We have to reply with right content
+	to show to Git client that we are an "intelligent" server.
+
+	The "right" content is special header and custom top 2 rows of data in the response.
+	'''
+	def __init__(self, path_prefix):
+		self.path_prefix = path_prefix.decode('utf8')
+
+	def __call__(self, environ, start_response):
+		"""WSGI Response producer for HTTP GET Git Smart HTTP /info/refs request."""
+
+		canned_handlers = environ.get('WSGIHandlerSelector.canned_handlers')
+
+		query_string = urlparse.parse_qs(environ.get('QUERY_STRING') or '')
+		git_command = ( query_string.get('service') or ['some trash'] )[0]
+		# print "git command is %s\n" % git_command
+		# if git_command[:4] != 'git-': # this would be better for future, when more commands are introduced.
+		# in the mean time, will use this:
+		if git_command not in ['git-upload-pack', 'git-receive-pack']:
+			return canned_handlers('bad_request', environ, start_response)
+
+		# /info/refs?service=git-receive-pack
+
+		uri_sections = environ.get('WSGIHandlerSelector.matched_groups') or {}
+		repo_path = uri_sections.get('working_path') or ''
+		repo_path = os.path.abspath(os.path.join(self.path_prefix, repo_path.decode('utf8').strip('/')))
+		if not os.path.isdir(repo_path): # TODO: Need to do better and check if the dir is actually a git repo.
+			return canned_handlers('not_found', environ, start_response)
+
+		# print "repo path is determined to be %s\n" % repo_path
+
+		if not has_access(
+			environ = environ,
+			repo_path = repo_path,
+			git_command = git_command
+			):
+			return canned_handlers('access_denied', environ, start_response)
+
+		# note to self:
+		# please, resist the urge to add '\n' everywhere and increment line count by 1.
+		# The code in Git client not only does NOT need it, but actually blows up
+		# if you sprinkle "flush" (0000) as "0001\n".
+		# It reads binary, per number of bytes specified.
+		# if you do add '\n' as part of data, count it.
+
+		ioObj = StringIO()
+		smart_server_advert = '# service=%s' % git_command
+		ioObj.write(hex(len(smart_server_advert)+4)[2:].rjust(4,'0') + smart_server_advert)
+ 		ioObj.write('0000') 
+		ioObj, err = command_output(
+				r'git %s --stateless-rpc --advertise-refs "%s"' % (git_command[4:], repo_path)
+				, ioObj
+				)
+		if err:
+			return canned_handlers('execution_failed', environ, start_response)
+
+		ioObj.reset()
+		start_response("200 OK", [('Content-type', 'application/x-%s-advertisement' % git_command)])
+		return ioObj
+
+class RPCHandler(object):
 	'''
 	Implementation of a WSGI handler (app) specifically capable of responding
 	to git-http-backend (Git Smart HTTP) RPC calls sent over HTTP POST.
@@ -55,100 +163,6 @@ class RPCHandler():
 
 		start_response("200 Ok", [('Content-type', 'text/plain')])
 		return ['']
-
-class InfoRefsHandler():
-	'''
-	Implementation of a WSGI handler (app) specifically capable of responding
-	to git-http-backend (Git Smart HTTP) /info/refs call over HTTP GET.
-
-	This is the fist step in the RPC dialog. We have to reply with right content
-	to show to Git client that we are an "intelligent" server.
-
-	The "right" content is special header and custom top 2 rows of data in the response.
-	'''
-	def __init__(self, repo_fs_path):
-		self.path_prefix = repo_fs_path
-
-	def __call__(self, environ, start_response):
-		"""WSGI Response producer for HTTP GET Git Smart HTTP /info/refs request."""
-		# TODO: Handle 100-Continue here
-
-		command = r'git receive-pack --stateless-rpc --advertise-refs "/cygdrive/c/tmp/testgitrepo.git"'
-		commandProcess = self.get_command_subprocess(command)
-		out, err = commandProcess.communicate()
-
-		method = 'upload-pack'
-		if not err:
-			print 'serving good.'
-			start_response("200 Ok", [('Content-type', 'application/x-git-%s-advertisement' % method)])
-			advert = '# service=git-%s\n' % upload-pack
-			return [
-				hex(len(advert)+4)[2:].rjust(4,'0') + advert ,
-				'0000\n',
-				out
-				]
-
-		start_response("200 Ok", [('Content-type', 'text/plain')])
-		return ['']
-
-def process_GET(self, environ, start_response):
-	length= int(environ.get('CONTENT_LENGTH', '0') or '0')
-#		print environ['wsgi.input'].read(length)
-#		body = StringIO()
-#		body.write( environ['wsgi.input'].read(length) )
-#		body.write('\nLast line\n')
-#		# environ['wsgi_input'] = body
-#		body.seek(0)
-	command = r'git receive-pack --stateless-rpc --advertise-refs "/cygdrive/c/tmp/testgitrepo.git"'
-	commandProcess = self.get_command_subprocess(command)
-	out, err = commandProcess.communicate()
-
-	method = 'upload-pack'
-	if not err:
-		print 'serving good.'
-		start_response("200 Ok", [('Content-type', 'application/x-git-%s-advertisement' % method)])
-		advert = '# service=git-%s\n' % upload-pack
-		return [
-			hex(len(advert)+4)[2:].rjust(4,'0') + advert ,
-			'0000\n',
-			out
-			]
-	else:
-		start_response("200 Ok", [('Content-type', 'text/plain')])
-		return ['']
-
-	def process_unsupported(self, *args, **kw):
-		start_response("200 Ok", [('Content-type', 'text/plain')])
-		return ["don't understand"]
-
-	def get_command_subprocess(commandline):
-		"""
-		 commandline - may be a string, or a list.
-		 Returns:
-		 Popen object with .communicate(), .stdin, .stdout, .stderr - file-like
-		"""
-		return subprocess.Popen(commandline, bufsize = 1,
-			stdin = subprocess.PIPE, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
-		# additonal arguments to consider # cwd = workingpath, universal_newlines = True
-
-	def test(self):
-		command = r'git receive-pack --stateless-rpc --advertise-refs "/cygdrive/c/tmp/testgitrepo.git"'
-		commandProcess = self.get_command_subprocess(command)
-		print 'Output:\n%s\n\nErrors:\n%s' % (commandProcess.communicate())
-
-	def __init__(self):
-		self.handlerfn = {
-			'POST': self.process_POST,
-			'GET': self.process_GET,
-		}
-		self.SERVICES = [
-				["POST", 'service_rpc',      "(.*?)/git-upload-pack$",  'upload-pack'],
-				["POST", 'service_rpc',      "(.*?)/git-receive-pack$", 'receive-pack']
-			]
-
-	def __call__(self, environ, start_response):
-		method = environ.get('REQUEST_METHOD','GET')
-		return self.handlerfn.get(method, self.process_unsupported)(environ, start_response)
 
 def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = ''):
 	'''
@@ -179,25 +193,24 @@ def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = ''):
 	from StaticWSGIServer import StaticWSGIServer
 	from WSGIHandlerSelector import WSGIHandlerSelector
 	from WSGICannedHTTPHandlers import CannedHTTPHandlers
-	# from GitHttpBackend import RPCHandler as GitRPCHandler, InfoRefsHandler as GitInfoRefsHandler
-
 
 	canned_handlers = CannedHTTPHandlers()
 	selector = WSGIHandlerSelector(canned_handlers = canned_handlers)
-	generic_handler = StaticContentServer(path_prefix, canned_handlers = canned_handlers)
-#	git_inforefs_handler = GitInfoRefsHandler(path_prefix)
+	generic_handler = StaticWSGIServer(path_prefix, canned_handlers = canned_handlers)
+	git_inforefs_handler = GitInfoRefsHandler(path_prefix)
 #	git_rpc_handler = GitRPCHandler(path_prefix)
 
 	## TESTING SETTINGS:
-	# from wsgiref import simple_server
-	# app = simple_server.demo_app
-	# selector.add('^.*$',app)
+	from wsgiref import simple_server
+#	app = simple_server.demo_app
+#	selector.add('/vars/(?P<working_path>.*)$', app)
 
 	if repo_uri_marker:
-		marker_regex = '^(?P<decorative_path>.*?)(?:/'+ repo_uri_marker.decode('utf8') + '/)'
+		marker_regex = r'(?P<decorative_path>.*?)(?:/'+ repo_uri_marker.decode('utf8') + ')'
 	else:
-		marker_regex = ''
-#	selector.add(marker_regex + '(?P<working_path>.*)/info/refs$', GET = git_inforefs_handler, HEAD = git_inforefs_handler)
+		marker_regex = r''
+
+	selector.add(marker_regex + '(?P<working_path>.*?)/info/refs$', GET = git_inforefs_handler, HEAD = git_inforefs_handler)
 #	selector.add(marker_regex + '(?P<working_path>.*)/git-(?P<git_command>.+)$', POST = git_rpc_handler) # regex is "greedy" it will skip all cases of /git- until it finds last one.
 	selector.add(marker_regex + '(?P<working_path>.*)$', GET = generic_handler, HEAD = generic_handler)
 	# selector.add('^.*$', GET = generic_handler) # if none of the above yield anything, serve everything.

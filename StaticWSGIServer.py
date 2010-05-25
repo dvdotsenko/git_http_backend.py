@@ -29,7 +29,7 @@ import time
 import os
 from WSGICannedHTTPHandlers import CannedHTTPHandlers
 
-class StaticContentServer(object):
+class StaticWSGIServer(object):
 	"""
 	A simple WSGI-based static content server app.
 
@@ -68,13 +68,13 @@ class StaticContentServer(object):
 		else:
 			canned_handlers = CannedHTTPHandlers()
 
-		selector_vars = environ.get('WSGIHandlerSelector.matched_groups',{})
+		selector_vars = environ.get('WSGIHandlerSelector.matched_groups') or {}
 		if 'working_path' in selector_vars:
 			# working_path is a custom key that I just happened to decide to use
 			# for marking the portion of the URI that is palatable for this static server.
 			path_info = selector_vars['working_path'].decode('utf8')
 		else:
-			path_info = environ.get('PATH_INFO', '').decode('utf8') 
+			path_info = environ.get('PATH_INFO', '').decode('utf8')
 
 		# this, i hope, safely turns the relative path into OS-specific, absolute.
 		full_path = os.path.abspath(os.path.join(self.root, path_info.strip('/')))

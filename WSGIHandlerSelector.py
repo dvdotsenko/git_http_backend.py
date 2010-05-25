@@ -23,6 +23,7 @@ Fifth Floor, Boston, MA  02110-1301  USA
 """
 
 import re
+import urlparse
 from WSGICannedHTTPHandlers import CannedHTTPHandlers
 
 class WSGIHandlerSelector(object):
@@ -191,11 +192,13 @@ class WSGIHandlerSelector(object):
 					# defined it will be returned for all unmatched HTTP methods.
 					_handler = _registered_methods.get(environ['REQUEST_METHOD'])
 					break
-
 		if _handler:
 			environ['PATH_INFO'] = path.encode('utf8')
-			environ[self.WSGI_env_key+'.matched_groups'] = \
-				environ.get(self.WSGI_env_key+'.matched_groups', {}).update(_matches.groupdict())
+
+			mg = environ.get(self.WSGI_env_key+'.matched_groups', {})
+			mg.update(_matches.groupdict())
+			environ[self.WSGI_env_key+'.matched_groups'] = mg
+
 			environ[self.WSGI_env_key+'.matched_request_methods'] = \
 				_registered_methods.keys() or [ environ['REQUEST_METHOD'] ]
 			environ[self.WSGI_env_key+'.canned_handlers'] = self.canned_handlers
@@ -204,6 +207,6 @@ class WSGIHandlerSelector(object):
 			# uugh... narrow miss. The regex matched, but the method is off.
 			# let's advertize what methods we can do with this URI.
 			return self.canned_handlers('method_not_allowed', environ,
-				start_response, [('Allow', ', '.join(_registered_methods.keys()))])
+				start_response, headers = [('Allow', ', '.join(_registered_methods.keys()))])
 		else:
 			return self.canned_handlers('not_found', environ, start_response)
