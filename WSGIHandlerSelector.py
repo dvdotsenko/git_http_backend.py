@@ -139,6 +139,9 @@ class WSGIHandlerSelector(object):
 		If you want to expand "custom_assembled" mapping dict like {'GET':a,'POST':b}:
 			.add('^(?P<working_path>.*)$', **custom_assembled_dict)
 
+		If the string contains '\?' - which translates to '?' for non-regex strings,
+		we understand that as "match on QUERY_PATH + '?' + QUERY_STRING"
+
 		Matched groups will be in a dictionary under WSGIHandlerSelector.matched_groups
 		"""
 		if len(arg) > 0:
@@ -147,7 +150,7 @@ class WSGIHandlerSelector(object):
 			methods = self.dict_with_default(arg[1], http_methods.copy())
 		else:
 			methods = http_methods.copy()
-		self.mappings.append((re.compile(path.decode('utf8')), methods))
+		self.mappings.append((re.compile(path.decode('utf8')), methods, (path.find('\?')>-1) ))
 
 	def __call__(self, environ, start_response):
 		"""
@@ -178,14 +181,15 @@ class WSGIHandlerSelector(object):
 		_matches = None
 		_handler = None
 		_registered_methods = {}
+		_query_string = (environ.get('QUERY_STRING') or '')
 
 		# sanitizing the path:
 		# turns garbage like this: r'//qwre/asdf/..*/*/*///.././../qwer/./..//../../.././//yuioghkj/../wrt.sdaf'
 		# into something like this: /../../wrt.sdaf
 		path = urlparse.urljoin(u'/', re.sub('//+','/',path.strip('/')))
 		if not path.startswith('/../'):
-			for _regex, _registered_methods in self.mappings:
-				_matches = _regex.search(path)
+			for _regex, _registered_methods, _use_query_string in self.mappings:
+				_matches = _regex.search('?'.join([path,int(_use_query_string)*_query_string]))
 				if _matches:
 					# note, there is a chance that 'methods' is an instance of our custom
 					# dict_with_default class, which means if default handler was

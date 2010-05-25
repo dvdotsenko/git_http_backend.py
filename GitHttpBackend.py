@@ -24,6 +24,7 @@ GNU Lesser General Public License for more details.
 You should have received a copy of the GNU Lesser General Public License
 along with git_http_backend.py Project.  If not, see <http://www.gnu.org/licenses/>.
 '''
+import os
 import os.path
 import urlparse
 from cStringIO import StringIO
@@ -56,7 +57,7 @@ def command_output(cmd, ioObj = StringIO()):
 	Returns obj as IO and ExecutionError as boolean.
 	'''
 
-	# print "This is the command:\n%s\n" % cmd
+	print "This is the command:\n%s\n" % cmd
 
 #	try:
 	if True:
@@ -97,12 +98,16 @@ class GitInfoRefsHandler(object):
 		if git_command not in ['git-upload-pack', 'git-receive-pack']:
 			return canned_handlers('bad_request', environ, start_response)
 
-		# /info/refs?service=git-receive-pack
-
 		uri_sections = environ.get('WSGIHandlerSelector.matched_groups') or {}
 		repo_path = uri_sections.get('working_path') or ''
 		repo_path = os.path.abspath(os.path.join(self.path_prefix, repo_path.decode('utf8').strip('/')))
-		if not os.path.isdir(repo_path): # TODO: Need to do better and check if the dir is actually a git repo.
+
+		try:
+			files = set(os.listdir(repo_path))
+		except:
+			files = set()
+
+		if not set(['config', 'HEAD', 'info','objects', 'refs']).issubset(files):
 			return canned_handlers('not_found', environ, start_response)
 
 		# print "repo path is determined to be %s\n" % repo_path
@@ -134,7 +139,7 @@ class GitInfoRefsHandler(object):
 
 		ioObj.reset()
 		start_response("200 OK", [('Content-type', 'application/x-%s-advertisement' % git_command)])
-		return ioObj
+		return [ioObj.read()]
 
 class RPCHandler(object):
 	'''
@@ -159,7 +164,7 @@ class RPCHandler(object):
 
 		returns an iterator obj with contents of git command's response to stdout
 		"""
-		# TODO: Handle 100-Continue here
+
 
 		start_response("200 Ok", [('Content-type', 'text/plain')])
 		return ['']
@@ -210,7 +215,7 @@ def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = ''):
 	else:
 		marker_regex = r''
 
-	selector.add(marker_regex + '(?P<working_path>.*?)/info/refs$', GET = git_inforefs_handler, HEAD = git_inforefs_handler)
+	selector.add(marker_regex + '(?P<working_path>.*?)/info/refs\?.*?service=git-.*?$', GET = git_inforefs_handler, HEAD = git_inforefs_handler)
 #	selector.add(marker_regex + '(?P<working_path>.*)/git-(?P<git_command>.+)$', POST = git_rpc_handler) # regex is "greedy" it will skip all cases of /git- until it finds last one.
 	selector.add(marker_regex + '(?P<working_path>.*)$', GET = generic_handler, HEAD = generic_handler)
 	# selector.add('^.*$', GET = generic_handler) # if none of the above yield anything, serve everything.
