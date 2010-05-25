@@ -90,27 +90,20 @@ class GitInfoRefsHandler(object):
 
 		canned_handlers = environ.get('WSGIHandlerSelector.canned_handlers')
 
-		query_string = urlparse.parse_qs(environ.get('QUERY_STRING') or '')
-		git_command = ( query_string.get('service') or ['some trash'] )[0]
-		# print "git command is %s\n" % git_command
-		# if git_command[:4] != 'git-': # this would be better for future, when more commands are introduced.
-		# in the mean time, will use this:
+		request_uri_elements = environ.get('WSGIHandlerSelector.matched_groups') or {}
+
+		git_command = request_uri_elements.get('git_command') or ''
 		if git_command not in ['git-upload-pack', 'git-receive-pack']:
 			return canned_handlers('bad_request', environ, start_response)
 
-		uri_sections = environ.get('WSGIHandlerSelector.matched_groups') or {}
-		repo_path = uri_sections.get('working_path') or ''
+		repo_path = request_uri_elements.get('working_path') or ''
 		repo_path = os.path.abspath(os.path.join(self.path_prefix, repo_path.decode('utf8').strip('/')))
-
 		try:
 			files = set(os.listdir(repo_path))
 		except:
 			files = set()
-
 		if not set(['config', 'HEAD', 'info','objects', 'refs']).issubset(files):
 			return canned_handlers('not_found', environ, start_response)
-
-		# print "repo path is determined to be %s\n" % repo_path
 
 		if not has_access(
 			environ = environ,
@@ -215,9 +208,9 @@ def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = ''):
 	else:
 		marker_regex = r''
 
-	selector.add(marker_regex + '(?P<working_path>.*?)/info/refs\?.*?service=git-.*?$', GET = git_inforefs_handler, HEAD = git_inforefs_handler)
-#	selector.add(marker_regex + '(?P<working_path>.*)/git-(?P<git_command>.+)$', POST = git_rpc_handler) # regex is "greedy" it will skip all cases of /git- until it finds last one.
-	selector.add(marker_regex + '(?P<working_path>.*)$', GET = generic_handler, HEAD = generic_handler)
-	# selector.add('^.*$', GET = generic_handler) # if none of the above yield anything, serve everything.
+	selector.add(marker_regex + r'(?P<working_path>.*?)/info/refs\?.*?service=(?P<git_command>git-[^&]+).*$', GET = git_inforefs_handler, HEAD = git_inforefs_handler)
+#	selector.add(marker_regex + r'(?P<working_path>.*)/git-(?P<git_command>[^/]+)/?$', POST = git_rpc_handler) # regex is "greedy" it will skip all cases of /git- until it finds last one.
+	selector.add(marker_regex + r'(?P<working_path>.*)$', GET = generic_handler, HEAD = generic_handler)
+	# selector.add('^.*$', GET = generic_handler) # if none of the above yi(?P<working_path>.*)/git-(?P<git_command>.+)$eld anything, serve everything.
 
 	return selector
