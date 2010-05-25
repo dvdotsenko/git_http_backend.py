@@ -150,7 +150,7 @@ class WSGIHandlerSelector(object):
 			methods = self.dict_with_default(arg[1], http_methods.copy())
 		else:
 			methods = http_methods.copy()
-		self.mappings.append((re.compile(path.decode('utf8')), methods, (path.find('\?')>-1) ))
+		self.mappings.append((re.compile(path.decode('utf8')), methods, (path.find(r'\?')>-1) ))
 
 	def __call__(self, environ, start_response):
 		"""
@@ -189,7 +189,11 @@ class WSGIHandlerSelector(object):
 		path = urlparse.urljoin(u'/', re.sub('//+','/',path.strip('/')))
 		if not path.startswith('/../'):
 			for _regex, _registered_methods, _use_query_string in self.mappings:
-				_matches = _regex.search('?'.join([path,int(_use_query_string)*_query_string]))
+				if _use_query_string:
+					_matches = _regex.search(path + '?' + _query_string) 
+				else:
+					_matches = _regex.search(path)
+				
 				if _matches:
 					# note, there is a chance that 'methods' is an instance of our custom
 					# dict_with_default class, which means if default handler was
@@ -206,6 +210,13 @@ class WSGIHandlerSelector(object):
 			environ[self.WSGI_env_key+'.matched_request_methods'] = \
 				_registered_methods.keys() or [ environ['REQUEST_METHOD'] ]
 			environ[self.WSGI_env_key+'.canned_handlers'] = self.canned_handlers
+
+#			with open('envlog.txt','a') as _f:
+#				_k = environ.keys()
+#				_k.sort()
+#				_f.writelines(["%s: %s\n" % (key, environ[key]) for key in _k])
+#				_f.write('\n')
+
 			return _handler(environ, start_response)
 		elif _matches:
 			# uugh... narrow miss. The regex matched, but the method is off.
