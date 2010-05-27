@@ -47,37 +47,43 @@ def get_cmd_options(options = {}):
 	return options
 
 if __name__ == "__main__":
-	'''
-	Options:
-	--path_prefix (Defaults to '.' - current directory)
-		Serving contents of folder path passed in. Accepts relative paths,
-		including things like "./../" and resolves them agains current path.
+	_help = '''
+Options:
+--path_prefix (Defaults to '.' - current directory)
+	Serving contents of folder path passed in. Accepts relative paths,
+	including things like "./../" and resolves them agains current path.
 
-	--repo_uri_marker (Defaults to '')
-		Acts as a "virtual folder" - separator between decorative URI portion and
-		the actual (relative to path_prefix) path that will be appended to
-		path_prefix and used for pulling an actual file.
+	If you set this to actual .git folder, you don't need to specify the
+	folder's name on URI.
 
-		the URI does not have to start with contents of repo_uri_marker. It can
-		be preceeded by any number of "virtual" folders. For --repo_uri_marker 'my'
-		all of these will take you to the same repo:
-			http://localhost/my/HEAD
-			http://localhost/admysf/mylar/zxmy/my/HEAD
-		If you are using reverse proxy server, pick the visrtual, decorative URI
-		prefix / path of your choice. This WSGI hanlder will cut and rebase the URI.
+--repo_uri_marker (Defaults to '')
+	Acts as a "virtual folder" - separator between decorative URI portion
+	and the actual (relative to path_prefix) path that will be appended
+	to path_prefix and used for pulling an actual file.
 
-		Default of '' means that no cutting marker is used, and whole URI after FQDN is
-		used to find file relative to path_prefix.
+	the URI does not have to start with contents of repo_uri_marker. It can
+	be preceeded by any number of "virtual" folders.
+	For --repo_uri_marker 'my' all of these will take you to the same repo:
+		http://localhost/my/HEAD
+		http://localhost/admysf/mylar/zxmy/my/HEAD
+	If you are using reverse proxy server, pick the virtual, decorative URI
+	prefix / path of your choice. This hanlder will cut and rebase the URI.
 
-	--port (Defaults to 80)
+	Default of '' means that no cutting marker is used, and whole URI after
+	FQDN is used to find file relative to path_prefix.
 
-	Examples:
-	./this_file.py --path_prefix ".."
-		Will serve the folder above the parent_folder in which this_file.py is located.
-		A functional url could be http://localhost/parent_folder/this_file.py
+--port (Defaults to 80)
 
-	~/myscripts/this_file.py --path_prefix "./.git" --repo_uri_marker "myrepo"
-		Will serve chosen .git folder as http://localhost/myrepo/
+Examples:
+
+./this_file.py --path_prefix ".."
+	Will serve the folder above the parent_folder in which this_file.py
+	is located. A functional url could be
+	 http://localhost/parent_folder/this_file.py
+
+~/myscripts/this_file.py --path_prefix "./.git" --repo_uri_marker "myrepo"
+	Will serve chosen .git folder as http://localhost/myrepo/ or
+	http://localhost/does/not/matter/what/you/type/here/myrepo/
 
 	'''
 	import os
@@ -111,7 +117,21 @@ if __name__ == "__main__":
 	from wsgiref import simple_server
 	# app = simple_server.demo_app
 	httpd = simple_server.make_server('',int(command_options['port']),app)
-	try:
-		httpd.serve_forever()
-	except KeyboardInterrupt:
-		pass
+
+	if command_options.get('help'):
+		print _help
+	else:
+		if command_options['repo_uri_marker']:
+			_s = 'url fragment "/%s/"' % command_options['repo_uri_marker']
+		else:
+			_s = 'nothing.'
+		print '''
+		Starting git-http-backend server...
+		Port: %s
+		Base file system path: %s
+		Repo url must be prefixed by %s
+		''' % (command_options['port'], path_prefix, _s)
+		try:
+			httpd.serve_forever()
+		except KeyboardInterrupt:
+			pass
