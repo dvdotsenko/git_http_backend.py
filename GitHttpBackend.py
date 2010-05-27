@@ -65,16 +65,12 @@ def basic_checks(dataObj, environ, start_response):
 		It does the same basic steps - figure out working path, git command etc.
 		
 		Returns non-None object if an error was triggered (and already prepared in start_response).
-		Because the dataObj passed in mutable, it's passed as a pointer. Once this function returns,
+		Because the dataObj passed is mutable, it's passed as a pointer. Once this function returns,
 		this object, as created by calling class, will have the updated data.
 		'''
 		canned_handlers = environ.get('WSGIHandlerSelector.canned_handlers')
 
 		request_uri_elements = environ.get('WSGIHandlerSelector.matched_groups') or {}
-
-#		print 'request_uri_elements %s ' % request_uri_elements
-#		for i in request_uri_elements['git_command']:
-#			print ord(i), i
 
 		git_command = request_uri_elements.get('git_command') or ''
 		if git_command not in ['git-upload-pack', 'git-receive-pack']: # TODO: this is bad for future compatibility. There may be more commands supported then.
@@ -157,8 +153,8 @@ class SmartHTTPRPCHandler(object):
 	/repo_folder_name/info/refs (as implemented in a separate WSGI handler below)
 	must reply in a specific way in order for the Git client to decide to talk here.
 	'''
-	def __init__(self, repo_fs_path):
-		self.path_prefix = repo_fs_path
+	def __init__(self, path_prefix):
+		self.path_prefix = path_prefix
 		self.block_size = 65536
 
 	def __call__(self, environ, start_response):
@@ -176,11 +172,17 @@ class SmartHTTPRPCHandler(object):
 		dataObj = {'path_prefix':self.path_prefix}
 		answer = basic_checks(dataObj, environ, start_response)
 		if answer:
+			# this is a WSGI thing. basic_checks have already prepared the headers,
+			# and a response body (which is the 'answer') is returned here.
+			# presense of anythin of truthiness in 'answer' = some ERROR have
+			# already prepared a response and all I need to do is let go of the response.
 			return answer
 		git_command = dataObj['git_command']
 		repo_path = dataObj['repo_path']
 		headers = [('Content-type', 'text/plain')]
 		headersIface = Headers(headers)
+		# i have a feeling that WSGI server is doing the un-gziping transparently ang gives the body unpacked.
+		# my guess is that the response is gziped transparently as well. Will need to check.
 		gzipped_output = False # bool( (environ.get('HTTP_ACCEPT_ENCODING') or '').find('gzip') > -1 )
 
 		_l = int(environ.get('CONTENT_LENGTH') or 0)
