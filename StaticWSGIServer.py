@@ -37,27 +37,24 @@ class StaticWSGIServer(object):
 
 	Inputs:
 		path_prefix (mandatory)
-			String containing a file-system level path.
+			String containing a file-system level path behaving as served root.
 
-		canned_handlers (optional)
-			Function or class instance that can take WSGI-like arguments
+		canned_handlers (optional*)
+			Function or class instance that can take WSGI-like +2 arguments
 			and capable or emitting WSGI-compatible output.
-			(See CannedHTTPHandlers class above for details.)
+			(See CannedHTTPHandlers class for argument details.)
 			If omitted the code will try to pick the handler from environ's
 			WSGIHandlerSelector.canned_handlers key - product of WSGIHandlerSelector
-			If not set anywhere will be creating an instance on the fly for every request.
+			* If canned_handler is not passed in and not in environ, raise error.
 
 		block_size (optional)
-			File reader's buffer size. Defaults to 65536. Must be "named" arg.
-
-	Normally would be serving the same path as PATH_INFO with self.root as prefix.
+			File reader's buffer size. Defaults to 65536. 
 	"""
 
-	def __init__(self, pathprefix, canned_handlers = None, block_size = 65536, **kw):
+	def __init__(self, pathprefix, canned_handlers = None, block_size = 65536):
 		self.root = pathprefix
 		self.canned_handlers = canned_handlers
 		self.block_size = block_size
-		self.__dict__.update(kw)
 
 	def __call__(self, environ, start_response):
 		if self.canned_handlers:
@@ -67,16 +64,18 @@ class StaticWSGIServer(object):
 		else:
 			raise NotImplementedError
 
-		selector_vars = environ.get('WSGIHandlerSelector.matched_groups') or {}
-		if 'working_path' in selector_vars:
+		selector_matches = (environ.get('wsgiorg.routing_args') or ([],{}))[1]
+		if 'working_path' in selector_matches:
 			# working_path is a custom key that I just happened to decide to use
-			# for marking the portion of the URI that is palatable for this static server.
-			path_info = selector_vars['working_path'].decode('utf8')
+			# for marking the portion of the URI that is palatable for static serving.
+			# 'working_path' is the name of a regex group fed to WSGIHandlerSelector
+			path_info = selector_matches['working_path'].decode('utf8')
 		else:
 			path_info = environ.get('PATH_INFO', '').decode('utf8')
 
 		# this, i hope, safely turns the relative path into OS-specific, absolute.
 		full_path = os.path.abspath(os.path.join(self.root, path_info.strip('/')))
+
 		if not os.path.isfile(full_path):
 			return canned_handlers('not_found', environ, start_response)
 

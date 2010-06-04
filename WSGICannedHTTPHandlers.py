@@ -49,16 +49,15 @@ class CannedHTTPHandlers(object):
 		'200': "200 OK",
 	}
 
-	def __call__(self, code, environ, start_response, **kw):
+	def __call__(self, code, environ, start_response, headers = []):
 		'''
 		This is NOT a WSGI-compliant app. We convert an error code into
 		certain action over start_response and return a WSGI-compliant payload.
 		'''
-		headers = [('Content-Type', 'text/plain')]
-		if 'headers' in kw.keys():
-			hObj = Headers(headers)
-			for header in kw['headers']:
-				# key, value = header[0], '; '.join(header[1:])
+		headerbase = [('Content-Type', 'text/plain')]
+		if headers:
+			hObj = Headers(headerbase)
+			for header in headers:
 				hObj[header[0]] = '; '.join(header[1:])
-		start_response(self.collection[code], headers)
+		start_response(self.collection[code], headerbase)
 		return ['']
