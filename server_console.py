@@ -126,10 +126,10 @@ Examples:
 		else:
 			_s = 'nothing.'
 		print '''
-		Starting git-http-backend server...
-		Port: %s
-		Base file system path: %s
-		Repo url must be prefixed by %s
+Starting git-http-backend server...
+Port: %s
+Base file system path: %s
+Repo url must be prefixed by %s
 		''' % (command_options['port'], path_prefix, _s)
 		try:
 			httpd.serve_forever()

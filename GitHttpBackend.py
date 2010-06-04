@@ -90,7 +90,7 @@ def basic_checks(dataObj, environ, start_response):
 			repo_path = repo_path,
 			git_command = git_command
 			):
-			return canned_handlers('access_denied', environ, start_response)
+			return canned_handlers('forbidden', environ, start_response)
 
 		dataObj['git_command'] = git_command
 		dataObj['repo_path'] = repo_path

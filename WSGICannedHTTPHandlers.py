@@ -38,6 +38,8 @@ class CannedHTTPHandlers(object):
 		'401':'401 Access denied',
 		'access_denied':'401 Access denied',
 		'401.4': '401.4 Authorization failed by filter',
+		'403':'403 Forbidden',
+		'forbidden':'403 Forbidden',
 		'404': "404 Not Found",
 		'not_found': "404 Not Found",
 		'405': "405 Method Not Allowed",
