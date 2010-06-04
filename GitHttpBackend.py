@@ -142,21 +142,19 @@ class GitHTTPBackendBase(object):
 		baseheaders = [('Content-type', 'text/plain')]
 		headersIface = Headers(baseheaders)
 
-		outObj.seek(0)
-
 		# i have a feeling that WSGI server is doing the un-gziping transparently ang gives the body unpacked.
 		# response could be gziped transparently as well. Will need to check.
 
-		# if bool( (environ.get('HTTP_ACCEPT_ENCODING') or '').find('gzip') > -1 ):
-		if False:
-			with tempfile.SpooledTemporaryFile(max_size=327679, mode='w+b') as _file_out:
-				with gzip.GzipFile(mode = 'wb',  fileobj = _file_out) as _zfile:
-					_zfile.write(outObj.read(self.block_size))
-					_zfile.close()
-					outObj.close()
-					outObj = _file_out
-					headersIface['Content-Encoding'] = 'gzip'
-				outObj.seek(0)
+#		if bool( (environ.get('HTTP_ACCEPT_ENCODING') or '').find('gzip') > -1 ):
+#			with tempfile.SpooledTemporaryFile(max_size=327679, mode='w+b') as _file_out:
+#				_zfile = gzip.GzipFile(mode = 'wb',  fileobj = _file_out)
+#				outObj.seek(0)
+#				_zfile.write(outObj.read(self.block_size))
+#				_zfile.close()
+#				outObj = _file_out
+#				headersIface['Content-Encoding'] = 'gzip'
+
+		outObj.seek(0)
 
 		for header in headers:
 			headersIface[header[0]] = '; '.join(header[1:])
@@ -270,6 +268,7 @@ class SmartHTTPRPCHandler(GitHTTPBackendBase):
 				r'git %s --stateless-rpc "%s"' % (git_command[4:], repo_path)
 				, stdin = stdin
 				)
+		stdin.close()
 		headers = [('Content-type', 'application/x-%s-result' % git_command.encode('utf8'))]
 		return self.package_response(stdout, status, environ, start_response, headers = headers)
 
