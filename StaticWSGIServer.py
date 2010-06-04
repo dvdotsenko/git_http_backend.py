@@ -51,19 +51,12 @@ class StaticWSGIServer(object):
 			File reader's buffer size. Defaults to 65536. 
 	"""
 
-	def __init__(self, pathprefix, canned_handlers = None, block_size = 65536):
+	def __init__(self, pathprefix, canned_handlers, block_size = 65536):
 		self.root = pathprefix
 		self.canned_handlers = canned_handlers
 		self.block_size = block_size
 
 	def __call__(self, environ, start_response):
-		if self.canned_handlers:
-			canned_handlers = self.canned_handlers
-		elif 'WSGIHandlerSelector.canned_handlers' in environ:
-			canned_handlers = environ.get('WSGIHandlerSelector.canned_handlers')
-		else:
-			raise NotImplementedError
-
 		selector_matches = (environ.get('wsgiorg.routing_args') or ([],{}))[1]
 		if 'working_path' in selector_matches:
 			# working_path is a custom key that I just happened to decide to use
@@ -77,7 +70,7 @@ class StaticWSGIServer(object):
 		full_path = os.path.abspath(os.path.join(self.root, path_info.strip('/')))
 
 		if not os.path.isfile(full_path):
-			return canned_handlers('not_found', environ, start_response)
+			return self.canned_handlers('not_found', environ, start_response)
 
 		try:
 			mtime = os.stat(full_path).st_mtime
@@ -90,18 +83,18 @@ class StaticWSGIServer(object):
 
 			if_modified = environ.get('HTTP_IF_MODIFIED_SINCE')
 			if if_modified and (email.utils.parsedate(if_modified) >= email.utils.parsedate(last_modified)):
-				return canned_handlers('not_modified', environ, start_response, headers=customHeaders)
+				return self.canned_handlers('not_modified', environ, start_response, headers=customHeaders)
 
 			if_none = environ.get('HTTP_IF_NONE_MATCH')
 			if if_none and (if_none == '*' or etag in if_none):
-				return canned_handlers('not_modified', environ, start_response, headers=customHeaders)
+				return self.canned_handlers('not_modified', environ, start_response, headers=customHeaders)
 
 			content_type = mimetypes.guess_type(full_path)[0] or 'application/octet-stream'
 			customHeaders.append(('Content-Type', content_type))
 			start_response("200 OK", customHeaders)
 			return self._package_body(full_path, environ)
 		except:
-			return canned_handlers('not_found', environ, start_response)
+			return self.canned_handlers('not_found', environ, start_response)
 
 	def _package_body(self, full_path, environ):
 		"""Return an iterator over the body of the response."""
@@ -110,9 +103,3 @@ class StaticWSGIServer(object):
 			return environ['wsgi.file_wrapper']( file_like, self.block_size )
 		else:
 			return iter( lambda: file_like.read(self.block_size), '' )
-
-#if __name__ == '__main__':
-#	from wsgiref import simple_server
-#	httpd = simple_server.WSGIServer(('',80),simple_server.WSGIRequestHandler)
-#	httpd.set_app(StaticContentServer('\\tmp\\testgitrepo.git\\'))
-#	httpd.serve_forever()

@@ -51,8 +51,8 @@ class GitHTTPBackendBase(object):
 
 	def get_command_output(self, cmd,
 			stdin = None,
-			stdout = tempfile.SpooledTemporaryFile(max_size=327679, mode='w+b'),
-			stderr = tempfile.SpooledTemporaryFile(max_size=8192, mode='w+b')
+			stdout = None,
+			stderr = None
 			):
 		'''
 		command_output(cmd,stdin,stdout,stderr)
@@ -69,6 +69,12 @@ class GitHTTPBackendBase(object):
 			_internal_stdin = True
 		else:
 			_internal_stdin = False
+
+		if not stdout:
+			stdout = tempfile.SpooledTemporaryFile(max_size=327679, mode='w+b')
+
+		if not stderr:
+			stderr = tempfile.SpooledTemporaryFile(max_size=8192, mode='w+b')
 
 		_c = subprocess.Popen(cmd, bufsize = 1, stdin = stdin, stdout = stdout, stderr = stderr)
 		while _c.returncode == None:
@@ -114,7 +120,7 @@ class GitHTTPBackendBase(object):
 			if not set(['config', 'HEAD', 'info','objects', 'refs']).issubset(files):
 				return self.canned_handlers('not_found', environ, start_response)
 
-			if not has_access(
+			if not self.has_access(
 				environ = environ,
 				repo_path = repo_path,
 				git_command = git_command
@@ -128,13 +134,10 @@ class GitHTTPBackendBase(object):
 	def package_response(self, outObj, status, environ, start_response, headers):
 		if status[0]:
 			outObj.close()
-			del outObj
 			status[1].close()
-			del status
 			return self.canned_handlers('execution_failed', environ, start_response)
 		else:
 			status[1].close()
-			del status
 
 		baseheaders = [('Content-type', 'text/plain')]
 		headersIface = Headers(baseheaders)
@@ -156,7 +159,7 @@ class GitHTTPBackendBase(object):
 				outObj.seek(0)
 
 		for header in headers:
-			headersIface[header[0]] = ';'.join(header[1:])
+			headersIface[header[0]] = '; '.join(header[1:])
 
 		start_response("200 OK", baseheaders)
 		if 'wsgi.file_wrapper' in environ:
