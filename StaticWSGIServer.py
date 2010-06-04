@@ -27,7 +27,6 @@ import mimetypes
 import email.utils
 import time
 import os
-from WSGICannedHTTPHandlers import CannedHTTPHandlers
 
 class StaticWSGIServer(object):
 	"""
@@ -37,7 +36,7 @@ class StaticWSGIServer(object):
 	variables, cleaning up the URI, setting up default error handlers.
 
 	Inputs:
-		path_prefix
+		path_prefix (mandatory)
 			String containing a file-system level path.
 
 		canned_handlers (optional)
@@ -66,7 +65,7 @@ class StaticWSGIServer(object):
 		elif 'WSGIHandlerSelector.canned_handlers' in environ:
 			canned_handlers = environ.get('WSGIHandlerSelector.canned_handlers')
 		else:
-			canned_handlers = CannedHTTPHandlers()
+			raise NotImplementedError
 
 		selector_vars = environ.get('WSGIHandlerSelector.matched_groups') or {}
 		if 'working_path' in selector_vars:
@@ -81,9 +80,9 @@ class StaticWSGIServer(object):
 		if not os.path.isfile(full_path):
 			return canned_handlers('not_found', environ, start_response)
 
-#		try:
-		if True:
-			etag, last_modified = self._file_stats(full_path)
+		try:
+			mtime = os.stat(full_path).st_mtime
+			etag, last_modified =  str(mtime), email.utils.formatdate(mtime)
 			customHeaders = [
 					('Date', email.utils.formatdate(time.time())),
 					('Last-Modified', last_modified),
@@ -102,13 +101,8 @@ class StaticWSGIServer(object):
 			customHeaders.append(('Content-Type', content_type))
 			start_response("200 OK", customHeaders)
 			return self._package_body(full_path, environ)
-#		except:
-#			return canned_handlers('not_found', environ, start_response)
-
-	def _file_stats(self, full_path):
-		"""Return a tuple of etag, last_modified by mtime from stat."""
-		mtime = os.stat(full_path).st_mtime
-		return str(mtime), email.utils.formatdate(mtime)
+		except:
+			return canned_handlers('not_found', environ, start_response)
 
 	def _package_body(self, full_path, environ):
 		"""Return an iterator over the body of the response."""
