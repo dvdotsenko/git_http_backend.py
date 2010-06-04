@@ -25,7 +25,6 @@ You should have received a copy of the GNU Lesser General Public License
 along with git_http_backend.py Project.  If not, see <http://www.gnu.org/licenses/>.
 '''
 import os
-import os.path
 import subprocess
 import tempfile
 import gzip
@@ -39,6 +38,7 @@ __version__=(1,7,0,4) # the number has no significance for this code's functiona
 class GitHTTPBackendBase(object):
 
 	block_size = 65536
+	gzip_response = False
 
 	def canned_handlers(self,*args,**kw):
 		'''
@@ -143,16 +143,17 @@ class GitHTTPBackendBase(object):
 		headersIface = Headers(baseheaders)
 
 		# i have a feeling that WSGI server is doing the un-gziping transparently ang gives the body unpacked.
-		# response could be gziped transparently as well. Will need to check.
-
-#		if bool( (environ.get('HTTP_ACCEPT_ENCODING') or '').find('gzip') > -1 ):
-#			with tempfile.SpooledTemporaryFile(max_size=327679, mode='w+b') as _file_out:
-#				_zfile = gzip.GzipFile(mode = 'wb',  fileobj = _file_out)
-#				outObj.seek(0)
-#				_zfile.write(outObj.read(self.block_size))
-#				_zfile.close()
-#				outObj = _file_out
-#				headersIface['Content-Encoding'] = 'gzip'
+		# Depending on WSGI server, response could be gziped transparently as well.
+		# Will need to check, but it may be preferable to forego compression here...
+		if self.gzip_response and bool( (environ.get('HTTP_ACCEPT_ENCODING') or '').find('gzip') > -1 ):
+			_file_out = tempfile.SpooledTemporaryFile(max_size=327679, mode='w+b')
+			_zfile = gzip.GzipFile(mode = 'wb',  fileobj = _file_out)
+			outObj.seek(0)
+			_zfile.write(outObj.read())
+			_zfile.close()
+			outObj.close()
+			outObj = _file_out
+			headersIface['Content-Encoding'] = 'gzip'
 
 		outObj.seek(0)
 
@@ -180,10 +181,15 @@ class GitInfoRefsHandler(GitHTTPBackendBase):
 	canned_handlers
 		Pointer to instance of callable class or a function.
 		See CannedHTTPHandlers class for details on what this is.
+	optional parameters may be passed as named arguments
+		These include
+			block_size (Default = 65536) Chunk size for WSGI file feeding
+			gzip_response (Default = False) Compress response body
 	'''
-	def __init__(self, path_prefix, canned_handlers):
+	def __init__(self, path_prefix, canned_handlers, **kw):
 		self.path_prefix = path_prefix.decode('utf8')
 		self.canned_handlers = canned_handlers
+		self.__dict__.update(kw)
 
 	def __call__(self, environ, start_response):
 		"""WSGI Response producer for HTTP GET Git Smart HTTP /info/refs request."""
@@ -226,9 +232,21 @@ class SmartHTTPRPCHandler(GitHTTPBackendBase):
 	/repo_folder_name/info/refs (as implemented in a separate WSGI handler below)
 	must reply in a specific way in order for the Git client to decide to talk here.
 	'''
-	def __init__(self, path_prefix, canned_handlers):
+	def __init__(self, path_prefix, canned_handlers, **kw):
+		'''
+	path_prefix
+		Local file system path = root of served files.
+	canned_handlers
+		Pointer to instance of callable class or a function.
+		See CannedHTTPHandlers class for details on what this is.
+	optional parameters may be passed as named arguments
+		These include
+			block_size (Default = 65536) Chunk size for WSGI file feeding
+			gzip_response (Default = False) Compress response body
+		'''
 		self.path_prefix = path_prefix.decode('utf8')
 		self.canned_handlers = canned_handlers
+		self.__dict__.update(kw)
 
 	def __call__(self, environ, start_response):
 		"""
@@ -270,6 +288,8 @@ class SmartHTTPRPCHandler(GitHTTPBackendBase):
 				)
 		stdin.close()
 		headers = [('Content-type', 'application/x-%s-result' % git_command.encode('utf8'))]
+
+
 		return self.package_response(stdout, status, environ, start_response, headers = headers)
 
 def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = ''):
@@ -310,8 +330,8 @@ def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = ''):
 	canned_handlers = CannedHTTPHandlers()
 	selector = WSGIHandlerSelector(canned_handlers = canned_handlers)
 	generic_handler = StaticWSGIServer(path_prefix, canned_handlers = canned_handlers) #TODO Static server MimeTypes db needs to know about Git files.
-	git_inforefs_handler = GitInfoRefsHandler(path_prefix, canned_handlers = canned_handlers)
-	git_rpc_handler = SmartHTTPRPCHandler(path_prefix, canned_handlers = canned_handlers)
+	git_inforefs_handler = GitInfoRefsHandler(path_prefix, canned_handlers = canned_handlers, gzip_response=True)
+	git_rpc_handler = SmartHTTPRPCHandler(path_prefix, canned_handlers = canned_handlers, gzip_response=True)
 
 	from wsgiref import simple_server
 
