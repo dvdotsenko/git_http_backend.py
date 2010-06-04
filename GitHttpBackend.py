@@ -289,7 +289,9 @@ class SmartHTTPRPCHandler(GitHTTPBackendBase):
 		stdin.close()
 		headers = [('Content-type', 'application/x-%s-result' % git_command.encode('utf8'))]
 
-
+		# updating refs manually after each push.
+		if not status[0] and git_command in [u'git-receive-pack']:
+			subprocess.call(u'git --git-dir "%s" update-server-info' % repo_path)
 		return self.package_response(stdout, status, environ, start_response, headers = headers)
 
 def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = ''):
