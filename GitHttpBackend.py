@@ -65,7 +65,7 @@ class GitHTTPBackendBase(object):
 		'''
 
 		if not stdin:
-			stdin = tempfile.SpooledTemporaryFile(max_size=256, mode='rb')
+			stdin = tempfile.SpooledTemporaryFile(max_size=256, mode='w+b')
 			_internal_stdin = True
 		else:
 			_internal_stdin = False
@@ -89,47 +89,47 @@ class GitHTTPBackendBase(object):
 		return stdout, (_c.returncode, stderr)
 
 	def basic_checks(self, dataObj, environ, start_response):
-			'''
-			This function is shared by GitInfoRefs and SmartHTTPRPCHandler WSGI classes.
-			It does the same basic steps - figure out working path, git command etc.
+		'''
+		This function is shared by GitInfoRefs and SmartHTTPRPCHandler WSGI classes.
+		It does the same basic steps - figure out working path, git command etc.
 
-			dataObj - dictionary
-			Because the dataObj passed in is mutable, it's a pointer. Once this function returns,
-			this object, as created by calling class, will have the free-form updated data.
+		dataObj - dictionary
+		Because the dataObj passed in is mutable, it's a pointer. Once this function returns,
+		this object, as created by calling class, will have the free-form updated data.
 
-			Returns non-None object if an error was triggered (and already prepared in start_response).
-			'''
-			selector_matches = (environ.get('wsgiorg.routing_args') or ([],{}))[1]
+		Returns non-None object if an error was triggered (and already prepared in start_response).
+		'''
+		selector_matches = (environ.get('wsgiorg.routing_args') or ([],{}))[1]
 
-			# making sure we have a compatible git command
-			git_command = selector_matches.get('git_command') or ''
-			if git_command not in ['git-upload-pack', 'git-receive-pack']: # TODO: this is bad for future compatibility. There may be more commands supported then.
-				return self.canned_handlers('bad_request', environ, start_response)
+		# making sure we have a compatible git command
+		git_command = selector_matches.get('git_command') or ''
+		if git_command not in ['git-upload-pack', 'git-receive-pack']: # TODO: this is bad for future compatibility. There may be more commands supported then.
+			return self.canned_handlers('bad_request', environ, start_response)
 
-			# making sure local path is a valid git repo folder
-			repo_path = os.path.abspath(
-				os.path.join(
-					self.path_prefix,
-					(selector_matches.get('working_path') or '').decode('utf8').strip('/')
-					)
+		# making sure local path is a valid git repo folder
+		repo_path = os.path.abspath(
+			os.path.join(
+				self.path_prefix,
+				(selector_matches.get('working_path') or '').decode('utf8').strip('/')
 				)
-			try:
-				files = set(os.listdir(repo_path))
-			except:
-				files = set()
-			if not set(['config', 'HEAD', 'info','objects', 'refs']).issubset(files):
-				return self.canned_handlers('not_found', environ, start_response)
+			)
+		try:
+			files = set(os.listdir(repo_path))
+		except:
+			files = set()
+		if not set(['config', 'HEAD', 'info','objects', 'refs']).issubset(files):
+			return self.canned_handlers('not_found', environ, start_response)
 
-			if not self.has_access(
-				environ = environ,
-				repo_path = repo_path,
-				git_command = git_command
-				):
-				return self.canned_handlers('forbidden', environ, start_response)
+		if not self.has_access(
+			environ = environ,
+			repo_path = repo_path,
+			git_command = git_command
+			):
+			return self.canned_handlers('forbidden', environ, start_response)
 
-			dataObj['git_command'] = git_command
-			dataObj['repo_path'] = repo_path
-			return None
+		dataObj['git_command'] = git_command
+		dataObj['repo_path'] = repo_path
+		return None
 
 	def package_response(self, outObj, status, environ, start_response, headers):
 		if status[0]:
@@ -145,7 +145,7 @@ class GitHTTPBackendBase(object):
 		# i have a feeling that WSGI server is doing the un-gziping transparently ang gives the body unpacked.
 		# Depending on WSGI server, response could be gziped transparently as well.
 		# Will need to check, but it may be preferable to forego compression here...
-		if self.gzip_response and bool( (environ.get('HTTP_ACCEPT_ENCODING') or '').find('gzip') > -1 ):
+		if outObj.tell() and self.gzip_response and bool( (environ.get('HTTP_ACCEPT_ENCODING') or '').find('gzip') > -1 ):
 			_file_out = tempfile.SpooledTemporaryFile(max_size=327679, mode='w+b')
 			_zfile = gzip.GzipFile(mode = 'wb',  fileobj = _file_out)
 			outObj.seek(0)
@@ -279,7 +279,6 @@ class SmartHTTPRPCHandler(GitHTTPBackendBase):
 		_i = environ.get('wsgi.input')
 		stdin = tempfile.SpooledTemporaryFile(max_size=_max_size, mode='w+b')
 		stdin.write(_i.read(_l))
-		_i.close()
 		stdin.seek(0)
 
 		stdout, status = self.get_command_output(
@@ -293,6 +292,13 @@ class SmartHTTPRPCHandler(GitHTTPBackendBase):
 		if not status[0] and git_command in [u'git-receive-pack']:
 			subprocess.call(u'git --git-dir "%s" update-server-info' % repo_path)
 		return self.package_response(stdout, status, environ, start_response, headers = headers)
+
+def demo_app(environ,start_response):
+	"""Demo app from wsgiref"""
+	start_response("200 OK", [('Content-Type', 'text/plain')])
+	cr = lambda s='': s + '\n'
+	for item in sorted(environ):
+		yield cr(' = '.join([item, unicode(environ[item]).encode('utf8')]) )
 
 def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = ''):
 	'''
@@ -331,21 +337,16 @@ def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = ''):
 
 	canned_handlers = CannedHTTPHandlers()
 	selector = WSGIHandlerSelector(canned_handlers = canned_handlers)
-	generic_handler = StaticWSGIServer(path_prefix, canned_handlers = canned_handlers) #TODO Static server MimeTypes db needs to know about Git files.
+	generic_handler = StaticWSGIServer(path_prefix, canned_handlers = canned_handlers, gzip_response=True)
 	git_inforefs_handler = GitInfoRefsHandler(path_prefix, canned_handlers = canned_handlers, gzip_response=True)
 	git_rpc_handler = SmartHTTPRPCHandler(path_prefix, canned_handlers = canned_handlers, gzip_response=True)
-
-	from wsgiref import simple_server
-
-	## TESTING SETTINGS:
-#	app = simple_server.demo_app
-#	selector.add('/vars/(?P<working_path>.*)$', app)
 
 	if repo_uri_marker:
 		marker_regex = r'(?P<decorative_path>.*?)(?:/'+ repo_uri_marker + ')'
 	else:
 		marker_regex = r''
 
+#	selector.add(r'showvars', GET = demo_app)
 	selector.add(marker_regex + r'(?P<working_path>.*?)/info/refs\?.*?service=(?P<git_command>git-[^&]+).*$', GET = git_inforefs_handler, HEAD = git_inforefs_handler)
 	selector.add(marker_regex + r'(?P<working_path>.*)/(?P<git_command>git-[^/]+)$', POST = git_rpc_handler) # this regex is "greedy" it will skip all cases of /git- until it finds last one.
 	selector.add(marker_regex + r'(?P<working_path>.*)$', GET = generic_handler, HEAD = generic_handler)
