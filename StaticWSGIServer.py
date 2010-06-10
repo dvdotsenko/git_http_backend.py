@@ -23,10 +23,13 @@ The Free Software Foundation, Inc.,
 51 Franklin Street, Fifth Floor, 
 Boston, MA  02110-1301, USA.
 """
-import mimetypes
-import email.utils
+
 import time
 import os
+import email.utils
+import mimetypes
+mimetypes.add_type('application/x-git-packed-objects-toc','.idx')
+mimetypes.add_type('application/x-git-packed-objects','.pack')
 
 class StaticWSGIServer(object):
 	"""
