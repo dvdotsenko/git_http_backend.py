@@ -27,7 +27,6 @@ along with git_http_backend.py Project.  If not, see <http://www.gnu.org/license
 import os
 import subprocess
 import tempfile
-import gzip
 from wsgiref.headers import Headers
 
 __version__=(1,7,0,4) # the number has no significance for this code's functionality.
@@ -47,6 +46,12 @@ class GitHTTPBackendBase(object):
 		raise NotImplementedError
 
 	def has_access(self, **kw):
+		'''
+		User rights verification code.
+		(This is NOT an authentication code. The authentication is handled by
+		the server that hosts this WSGI app. We just go by the name of the
+		already-authenticated user.
+		'''
 		return True
 
 	def get_command_output(self, cmd,
@@ -60,7 +65,7 @@ class GitHTTPBackendBase(object):
 		stdin,stdout,stderr (optional)
 		 FileIO-like objects. Default tempfile.SpooledTemporaryFile()
 
-		Returns rewound IO-like object and a tuple of:
+		Returns rewound IO-like object with output and a tuple of:
 		(command return code, errorOut fileIO-like object)
 		'''
 
@@ -77,16 +82,13 @@ class GitHTTPBackendBase(object):
 			stderr = tempfile.SpooledTemporaryFile(max_size=8192, mode='w+b')
 
 		_c = subprocess.Popen(cmd, bufsize = 1, stdin = stdin, stdout = stdout, stderr = stderr)
-		while _c.returncode == None:
-			trash = _c.communicate()
-		trash = _c.communicate()
-		del trash
+		_return_code = _c.wait()
 		if _internal_stdin:
 			stdin.close()
 			del stdin
 		stdout.seek(0)
 		stderr.seek(0)
-		return stdout, (_c.returncode, stderr)
+		return stdout, (_return_code, stderr)
 
 	def basic_checks(self, dataObj, environ, start_response):
 		'''
