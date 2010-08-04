@@ -28,6 +28,8 @@ import time
 import os
 import email.utils
 from wsgiref.headers import Headers
+import gzip
+import tempfile
 import mimetypes
 mimetypes.add_type('application/x-git-packed-objects-toc','.idx')
 mimetypes.add_type('application/x-git-packed-objects','.pack')

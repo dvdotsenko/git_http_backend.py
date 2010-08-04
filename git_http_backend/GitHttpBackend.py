@@ -27,6 +27,7 @@ along with git_http_backend.py Project.  If not, see <http://www.gnu.org/license
 import os
 import subprocess
 import tempfile
+import gzip
 from wsgiref.headers import Headers
 
 __version__=(1,7,0,4) # the number has no significance for this code's functionality.
@@ -38,6 +39,7 @@ class GitHTTPBackendBase(object):
 
 	block_size = 65536
 	gzip_response = False
+	git_folder_signature = set(['config', 'head', 'info','objects', 'refs'])
 
 	def canned_handlers(self,*args,**kw):
 		'''
@@ -65,8 +67,8 @@ class GitHTTPBackendBase(object):
 		stdin,stdout,stderr (optional)
 		 FileIO-like objects. Default tempfile.SpooledTemporaryFile()
 
-		Returns rewound IO-like object with output and a tuple of:
-		(command return code, errorOut fileIO-like object)
+		Returns rewound IO-like object with output, errorOut fileIO-like object
+		and a command exit code
 		'''
 
 		if not stdin:
@@ -88,7 +90,7 @@ class GitHTTPBackendBase(object):
 			del stdin
 		stdout.seek(0)
 		stderr.seek(0)
-		return stdout, (_return_code, stderr)
+		return stdout, stderr, _return_code
 
 	def basic_checks(self, dataObj, environ, start_response):
 		'''
@@ -108,6 +110,8 @@ class GitHTTPBackendBase(object):
 		if git_command not in ['git-upload-pack', 'git-receive-pack']: # TODO: this is bad for future compatibility. There may be more commands supported then.
 			return self.canned_handlers('bad_request', environ, start_response)
 
+		# TODO: Add "public" to "dynamic local" path conversion hook ups here.
+
 		# making sure local path is a valid git repo folder
 		repo_path = os.path.abspath(
 			os.path.join(
@@ -119,8 +123,9 @@ class GitHTTPBackendBase(object):
 			files = set(os.listdir(repo_path))
 		except:
 			files = set()
-		if not set(['config', 'HEAD', 'info','objects', 'refs']).issubset(files):
+		if not self.git_folder_signature.issubset([i.lower() for i in files]):
 			return self.canned_handlers('not_found', environ, start_response)
+			# TODO: Add dynamic / automatic creation of a repo here for authorized users
 
 		if not self.has_access(
 			environ = environ,
@@ -133,13 +138,7 @@ class GitHTTPBackendBase(object):
 		dataObj['repo_path'] = repo_path
 		return None
 
-	def package_response(self, outObj, status, environ, start_response, headers):
-		if status[0]:
-			outObj.close()
-			status[1].close()
-			return self.canned_handlers('execution_failed', environ, start_response)
-		else:
-			status[1].close()
+	def package_response(self, outIO, environ, start_response, headers):
 
 		baseheaders = [('Content-type', 'text/plain')]
 		headersIface = Headers(baseheaders)
@@ -147,26 +146,26 @@ class GitHTTPBackendBase(object):
 		# i have a feeling that WSGI server is doing the un-gziping transparently ang gives the body unpacked.
 		# Depending on WSGI server, response could be gziped transparently as well.
 		# Will need to check, but it may be preferable to forego compression here...
-		if outObj.tell() and self.gzip_response and bool( (environ.get('HTTP_ACCEPT_ENCODING') or '').find('gzip') > -1 ):
+		if outIO.tell() and self.gzip_response and bool( (environ.get('HTTP_ACCEPT_ENCODING') or '').find('gzip') > -1 ):
 			_file_out = tempfile.SpooledTemporaryFile(max_size=327679, mode='w+b')
 			_zfile = gzip.GzipFile(mode = 'wb',  fileobj = _file_out)
-			outObj.seek(0)
-			_zfile.write(outObj.read())
+			outIO.seek(0)
+			_zfile.write(outIO.read())
 			_zfile.close()
-			outObj.close()
-			outObj = _file_out
+			outIO.close()
+			outIO = _file_out
 			headersIface['Content-Encoding'] = 'gzip'
 
-		outObj.seek(0)
+		outIO.seek(0)
 
 		for header in headers:
 			headersIface[header[0]] = '; '.join(header[1:])
 
 		start_response("200 OK", baseheaders)
 		if 'wsgi.file_wrapper' in environ:
-			return environ['wsgi.file_wrapper']( outObj, self.block_size )
+			return environ['wsgi.file_wrapper']( outIO, self.block_size )
 		else:
-			return iter( lambda: outObj.read(self.block_size), '' )
+			return iter( lambda: outIO.read(self.block_size), '' )
 
 class GitInfoRefsHandler(GitHTTPBackendBase):
 	'''
@@ -215,12 +214,17 @@ class GitInfoRefsHandler(GitHTTPBackendBase):
 		stdout.write(hex(len(smart_server_advert)+4)[2:].rjust(4,'0') + smart_server_advert)
  		stdout.write('0000')
 
-		stdout, status = self.get_command_output(
+		stdout, stderr, exit_code = self.get_command_output(
 				r'git %s --stateless-rpc --advertise-refs "%s"' % (git_command[4:], repo_path)
 				, stdout=stdout
 				)
 		headers = [('Content-type','application/x-%s-advertisement' % str(git_command))]
-		return self.package_response(stdout, status, environ, start_response, headers = headers)
+
+		stderr.close() # TODO: might be useful to push the error out to client. At this time just discarding.
+		if exit_code: # non-zero value = error
+			stdout.close()
+			return self.canned_handlers('execution_failed', environ, start_response)
+		return self.package_response(stdout, environ, start_response, headers = headers)
 
 class SmartHTTPRPCHandler(GitHTTPBackendBase):
 	'''
@@ -265,7 +269,7 @@ class SmartHTTPRPCHandler(GitHTTPBackendBase):
 		dataObj = {}
 		answer = self.basic_checks(dataObj, environ, start_response)
 		if answer:
-			# this is a WSGI thing. basic_checks have already prepared the headers,
+			# this is a WSGI "trick". basic_checks have already prepared the headers,
 			# and a response body (which is the 'answer') is returned here.
 			# presense of anythin of truthiness in 'answer' = some ERROR have
 			# already prepared a response and all I need to do is let go of the response.
@@ -273,6 +277,11 @@ class SmartHTTPRPCHandler(GitHTTPBackendBase):
 		git_command = dataObj['git_command']
 		repo_path = dataObj['repo_path']
 
+		# transferring the contents of HTML request body into a temp file.
+		#  You might be thinking "why not just pass the wsgi.input IO object as stdin?"
+		#  All IO objects, except for real STDIN must have filename property for
+		#  subprocess.Popen() to work. When / if that's fixed, you could try passing wsgi.input 
+		#  direcltly to subprocess.Popen() as stdin
 		_l = int(environ.get('CONTENT_LENGTH') or 0)
 		if _l > 327679:
 			_max_size = 327679
@@ -283,24 +292,22 @@ class SmartHTTPRPCHandler(GitHTTPBackendBase):
 		stdin.write(_i.read(_l))
 		stdin.seek(0)
 
-		stdout, status = self.get_command_output(
+		stdout, stderr, exit_code = self.get_command_output(
 				r'git %s --stateless-rpc "%s"' % (git_command[4:], repo_path)
 				, stdin = stdin
 				)
 		stdin.close()
-		headers = [('Content-type', 'application/x-%s-result' % git_command.encode('utf8'))]
 
-		# updating refs manually after each push.
-		if not status[0] and git_command in [u'git-receive-pack']:
+		stderr.close() # TODO: might be useful to push the error out to client. At this time just discarding.
+		if exit_code: # non-zero value = error
+			stdout.close()
+			return self.canned_handlers('execution_failed', environ, start_response)
+		elif git_command in [u'git-receive-pack']:
+			# updating refs manually after each push. Needed for pre-1.7.0.4 git clients using regular HTTP mode.
 			subprocess.call(u'git --git-dir "%s" update-server-info' % repo_path)
-		return self.package_response(stdout, status, environ, start_response, headers = headers)
 
-def demo_app(environ,start_response):
-	"""Demo app from wsgiref"""
-	start_response("200 OK", [('Content-Type', 'text/plain')])
-	cr = lambda s='': s + '\n'
-	for item in sorted(environ):
-		yield cr(' = '.join([item, unicode(environ[item]).encode('utf8')]) )
+		headers = [('Content-type', 'application/x-%s-result' % git_command.encode('utf8'))]
+		return self.package_response(stdout, environ, start_response, headers = headers)
 
 def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = ''):
 	'''
@@ -348,7 +355,6 @@ def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = ''):
 	else:
 		marker_regex = r''
 
-#	selector.add(r'showvars', GET = demo_app)
 	selector.add(marker_regex + r'(?P<working_path>.*?)/info/refs\?.*?service=(?P<git_command>git-[^&]+).*$', GET = git_inforefs_handler, HEAD = git_inforefs_handler)
 	selector.add(marker_regex + r'(?P<working_path>.*)/(?P<git_command>git-[^/]+)$', POST = git_rpc_handler) # this regex is "greedy" it will skip all cases of /git- until it finds last one.
 	selector.add(marker_regex + r'(?P<working_path>.*)$', GET = generic_handler, HEAD = generic_handler)
