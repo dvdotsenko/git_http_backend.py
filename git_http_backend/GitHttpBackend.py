@@ -26,6 +26,7 @@ GNU Lesser General Public License for more details.
 You should have received a copy of the GNU Lesser General Public License
 along with git_http_backend.py Project.  If not, see <http://www.gnu.org/licenses/>.
 '''
+import os.path
 
 import os
 import subprocess
@@ -318,7 +319,10 @@ class StaticWSGIServer(BaseWSGIClass):
 
 		# this, i hope, safely turns the relative path into OS-specific, absolute.
 		full_path = os.path.abspath(os.path.join(self.path_prefix, path_info.strip('/')))
+		_pp = os.path.abspath(self.path_prefix)
 
+		if not full_path.startswith(_pp):
+			return self.canned_handlers(environ, start_response, 'forbidden')
 		if not os.path.isfile(full_path):
 			return self.canned_handlers(environ, start_response, 'not_found')
 
@@ -343,7 +347,8 @@ class StaticWSGIServer(BaseWSGIClass):
 		return self.package_response(self, file_like, environ, start_response, headers)
 
 class GitHTTPBackendBase(BaseWSGIClass):
-	git_folder_signature = set(['config', 'head', 'info','objects', 'refs'])
+	git_folder_signature = set(['config', 'head', 'info', 'objects', 'refs'])
+	repo_auto_create = False
 
 	def has_access(self, **kw):
 		'''
@@ -386,8 +391,6 @@ class GitHTTPBackendBase(BaseWSGIClass):
 		if _internal_stdin:
 			stdin.close()
 			del stdin
-		stdout.seek(0)
-		stderr.seek(0)
 		return stdout, stderr, _return_code
 
 	def basic_checks(self, dataObj, environ, start_response):
@@ -410,20 +413,20 @@ class GitHTTPBackendBase(BaseWSGIClass):
 
 		# TODO: Add "public" to "dynamic local" path conversion hook ups here.
 
+		#############################################################
 		# making sure local path is a valid git repo folder
+		#
 		repo_path = os.path.abspath(
 			os.path.join(
 				self.path_prefix,
-				(selector_matches.get('working_path') or '').decode('utf8').strip('/')
+				(selector_matches.get('working_path') or '').decode('utf8').strip('/').strip('\\')
 				)
 			)
-		try:
-			files = set(os.listdir(repo_path))
-		except:
-			files = set()
-		if not self.git_folder_signature.issubset([i.lower() for i in files]):
-			return self.canned_handlers(environ, start_response, 'not_found')
-			# TODO: Add dynamic / automatic creation of a repo here for authorized users
+		_pp = os.path.abspath(self.path_prefix)
+		
+		# this saves us from "hackers" putting relative paths after repo marker.
+		if not repo_path.startswith(_pp):
+			return self.canned_handlers(environ, start_response, 'forbidden')
 
 		if not self.has_access(
 			environ = environ,
@@ -431,6 +434,35 @@ class GitHTTPBackendBase(BaseWSGIClass):
 			git_command = git_command
 			):
 			return self.canned_handlers(environ, start_response, 'forbidden')
+
+		try:
+			files = os.listdir(repo_path)
+		except:
+			files = []
+		if not self.git_folder_signature.issubset([i.lower() for i in files]):
+			if not ( self.repo_auto_create and git_command == 'git-receive-pack' ):
+				return self.canned_handlers(environ, start_response, 'not_found')
+			else:
+				# 1. traverse entire post-prefix path and check that each segment
+				#    If it is ( a git folder OR a non-dir object ) forbid autocreate
+				# 2. Create folderS
+				# 3. Activate a bare git repo
+				_pf = _pp
+				_dirs = repo_path[len(_pp):].strip(os.sep).split(os.sep) or ['']
+				for _dir in _dirs:
+					_pf = os.path.join(_pf,_dir)
+					if not os.path.exists(_pf):
+						try:
+							os.makedirs(repo_path)
+						except:
+							return self.canned_handlers(environ, start_response, 'not_found')
+						break
+					elif not os.path.isdir(_pf) or self.git_folder_signature.issubset([i.lower() for i in os.listdir(_pf)]):
+						return self.canned_handlers(environ, start_response, 'forbidden')
+				if subprocess.call('git init --quiet --bare "%s"' % repo_path):
+					return self.canned_handlers(environ, start_response, 'execution_failed')
+		#
+		#############################################################
 
 		dataObj['git_command'] = git_command
 		dataObj['repo_path'] = repo_path
@@ -479,11 +511,12 @@ class GitInfoRefsHandler(GitHTTPBackendBase):
 
 		stdout, stderr, exit_code = self.get_command_output(
 				r'git %s --stateless-rpc --advertise-refs "%s"' % (git_command[4:], repo_path)
+				, stdin = -1
 				, stdout=stdout
+				, stderr = -1
 				)
 		headers = [('Content-type','application/x-%s-advertisement' % str(git_command))]
 
-		stderr.close() # TODO: might be useful to push the error out to client. At this time just discarding.
 		if exit_code: # non-zero value = error
 			stdout.close()
 			return self.canned_handlers(environ, start_response, 'execution_failed')
@@ -551,10 +584,11 @@ class SmartHTTPRPCHandler(GitHTTPBackendBase):
 		stdout, stderr, exit_code = self.get_command_output(
 				r'git %s --stateless-rpc "%s"' % (git_command[4:], repo_path)
 				, stdin = stdin
+				, stderr = -1
 				)
 		stdin.close()
+		del stdin
 
-		stderr.close() # TODO: might be useful to push the error out to client. At this time just discarding.
 		if exit_code: # non-zero value = error
 			stdout.close()
 			return self.canned_handlers(environ, start_response, 'execution_failed')
@@ -565,7 +599,7 @@ class SmartHTTPRPCHandler(GitHTTPBackendBase):
 		headers = [('Content-type', 'application/x-%s-result' % git_command.encode('utf8'))]
 		return self.package_response(stdout, environ, start_response, headers)
 
-def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = ''):
+def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = '', performance_settings = {}):
 	'''
 	Assembles basic WSGI-compatible application providing functionality of git-http-backend.
 
@@ -592,7 +626,8 @@ def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = ''):
 
 	repo_uri_marker = repo_uri_marker.decode('utf8')
 	path_prefix = path_prefix.decode('utf8')
-	settings = {"path_prefix": path_prefix, "gzip_response": False}
+	settings = {"path_prefix": path_prefix.decode('utf8')}
+	settings.update(performance_settings)
 
 	selector = WSGIHandlerSelector()
 	generic_handler = StaticWSGIServer(**settings)
@@ -682,7 +717,11 @@ Examples:
 
 	app = assemble_WSGI_git_app(
 			path_prefix = path_prefix,
-			repo_uri_marker = command_options['repo_uri_marker']
+			repo_uri_marker = command_options['repo_uri_marker'],
+			performance_settings = {
+				'repo_auto_create':True,
+				'gzip_response':False
+				}
 		)
 
 	# default Python's WSGI server. Replace with your choice of WSGI server
