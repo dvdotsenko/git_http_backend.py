@@ -656,7 +656,21 @@ def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = '', performance_s
 	return selector
 
 if __name__ == "__main__":
-	_help = '''
+	_help = r'''
+git_http_backend.py - Python-based server supporting regular and "Smart HTTP"
+	
+Note only the folder that contains folders and object that you normally see
+in .git folder is considered a "repo folder." This means that either a
+"bare" folder name or a working folder's ".git" folder will be a "repo" folder
+discussed in the examples below.
+
+When "repo-auto-create on Push" is used, the server automatically creates "bare"
+repo folders.
+
+Note, the folder does NOT have to have ".git" in the name to be a "repo" folder.
+You can name bare repo folders whatever you like. If the signature (right files
+and folders are found inside) matches a typical git repo, it's a "repo."
+
 Options:
 --path_prefix (Defaults to '.' - current directory)
 	Serving contents of folder path passed in. Accepts relative paths,
@@ -681,27 +695,46 @@ Options:
 	Default of '' means that no cutting marker is used, and whole URI after
 	FQDN is used to find file relative to path_prefix.
 
---port (Defaults to 80)
+--port (Defaults to 8080)
 
 Examples:
 
-./this_file.py --path_prefix ".."
-	Will serve the folder above the parent_folder in which this_file.py
-	is located. A functional url could be
-	 http://localhost/parent_folder/this_file.py
+cd c:\myproject_workingfolder\.git
+c:\tools\git_http_backend\GitHttpBackend.py --port 80
+	(Current path is used for serving.)
+	This project's repo will be one and only served directly over
+	 http://localhost/
 
-~/myscripts/this_file.py --path_prefix "./.git" --repo_uri_marker "myrepo"
-	Will serve chosen .git folder as http://localhost/myrepo/ or
-	http://localhost/does/not/matter/what/you/type/here/myrepo/
+cd c:\repos_folder
+c:\tools\git_http_backend\GitHttpBackend.py 
+	(note, no options are provided. Current path is used for serving.)
+	If the c:\repos_folder contains repo1.git, repo2.git folders, they 
+	become available as:
+	 http://localhost:8080/repo1.git  and  http://localhost:8080/repo2.git
 
-	'''
+~/myscripts/GitHttpBackend.py --path_prefix "~/somepath/repofolder" --repo_uri_marker "myrepo"
+	Will serve chosen repo folder as http://localhost/myrepo/ or
+	http://localhost:8080/does/not/matter/what/you/type/here/myrepo/
+	This "repo uri marker" is useful for making a repo server appear as a
+	part of some REST web application or make it appear as a part of server
+	while serving it from behind a reverse proxy.
+
+./GitHttpBackend.py --path_prefix ".." --port 80
+	Will serve the folder above the "git_http_backend" (in which 
+	GitHttpBackend.py happened to be located.) A functional url could be
+	 http://localhost/git_http_backend/GitHttpBackend.py
+	Let's assume the parent folder of git_http_backend folder has a ".git"
+	folder. Then the repo could be accessed as:
+	 http://localhost/.git/
+	This allows GitHttpBackend.py to be "self-serving" :)
+'''
 	import os
 	import sys
 
 	command_options = {
 			'path_prefix' : '.',
 			'repo_uri_marker' : '',
-			'port' : '80'
+			'port' : '8080'
 		}
 
 	lastKey = None
@@ -715,22 +748,21 @@ Examples:
 
 	path_prefix = os.path.abspath( command_options['path_prefix'] )
 
-	app = assemble_WSGI_git_app(
+	if 'help' in command_options:
+		print _help
+	else:
+		app = assemble_WSGI_git_app(
 			path_prefix = path_prefix,
 			repo_uri_marker = command_options['repo_uri_marker'],
 			performance_settings = {
 				'repo_auto_create':True,
-				'gzip_response':False
+				'gzip_response':True
 				}
 		)
 
-	# default Python's WSGI server. Replace with your choice of WSGI server
-	from wsgiref import simple_server
-	httpd = simple_server.make_server('',int(command_options['port']),app)
-
-	if 'help' in command_options:
-		print _help
-	else:
+		# default Python's WSGI server. Replace with your choice of WSGI server
+		from wsgiref import simple_server
+		httpd = simple_server.make_server('',int(command_options['port']),app)
 		if command_options['repo_uri_marker']:
 			_s = 'url fragment "/%s/"' % command_options['repo_uri_marker']
 		else:

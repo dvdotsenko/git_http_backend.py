@@ -1,0 +1,8 @@
+This project's code is designed to fulfill several deployment scenarios. These are:
+
+- command-line execution in a running console.
+- Deployment with various WSGI servers like:
+	- Apache mod_WSGI (*nix, Windows)
+	- Microsoft IIS 6,7.x (ISAPI_WSGI + cPython, NWSGI + IronPython)
+
+See individual folders for deployment instructions.

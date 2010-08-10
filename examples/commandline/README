@@ -1,0 +1,20 @@
+Summary:
+
+Entirety of the code is contained in one single python script file:
+ ./git_http_backend/GitHttpBackend.py
+It can be used both, as a Python module and as a command-line executable.
+
+The simplest way to run the server is to "double-click" on that py file
+in your file browser. See output of "--help" for options.
+
+Installation and running instructions:
+
+1. Check out latest git_http_backend.py repo:
+	git clone git://github.com/dvdotsenko/git_http_backend.py.git ghbpy
+2. (Optional) Copy one file to place of convenience:
+	(Windows:) copy .\ghbpy\git_http_backend\GitHttpBackend.py c:\tools\
+	(*nix) cp ./ghbpy/git_http_backend/GitHttpBackend.py ~/bin/
+3. Run the script with "--help" option to see the list of options and examples.
+	c:\tools\GitHttpBackend.py --help
+	~\bin\GitHttpBackend.py --help
+4. Run the same script with chosen options (or without any) to run the server.
