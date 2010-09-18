@@ -26,12 +26,14 @@ GNU Lesser General Public License for more details.
 You should have received a copy of the GNU Lesser General Public License
 along with git_http_backend.py Project.  If not, see <http://www.gnu.org/licenses/>.
 '''
-import os.path
-
 import os
+
 import subprocess
 import tempfile
-import gzip
+try:
+    import gzip
+except:
+    gzip = False
 from wsgiref.headers import Headers
 
 # needed for WSGI Selector
@@ -121,7 +123,7 @@ class BaseWSGIClass(object):
 		# that i would not have to relocate data from tempfile to gzip temp file, but
 		# subprocess.Popen(... stdout = gzIO, ...) spills both, compressed and uncompressed
 		# command output into gzIO's underlying fileno. Ugh! You just can't do the right thing around here...
-		if self.gzip_response and bool( (environ.get('HTTP_ACCEPT_ENCODING') or '').find('gzip') > -1 ):
+		if self.gzip_response and gzip and bool( (environ.get('HTTP_ACCEPT_ENCODING') or '').find('gzip') > -1 ):
 			outIO.seek(0,2)
 			if outIO.tell() > 1024:
 				_file_out = tempfile.SpooledTemporaryFile(max_size=self.tmp_file_buffer_size, mode='w+b')
@@ -344,7 +346,7 @@ class StaticWSGIServer(BaseWSGIClass):
 
 		headersIface['Content-Type'] = mimetypes.guess_type(full_path)[0] or 'application/octet-stream'
 		file_like = open(full_path, 'rb')
-		return self.package_response(self, file_like, environ, start_response, headers)
+		return self.package_response(file_like, environ, start_response, headers)
 
 class GitHTTPBackendBase(BaseWSGIClass):
 	git_folder_signature = set(['config', 'head', 'info', 'objects', 'refs'])
@@ -580,7 +582,7 @@ class SmartHTTPRPCHandler(GitHTTPBackendBase):
 		stdin = tempfile.SpooledTemporaryFile(max_size=_max_size, mode='w+b')
 		stdin.write(_i.read(_l))
 		stdin.seek(0)
-
+		
 		stdout, stderr, exit_code = self.get_command_output(
 				r'git %s --stateless-rpc "%s"' % (git_command[4:], repo_path)
 				, stdin = stdin
@@ -756,13 +758,13 @@ c:\tools\git_http_backend\GitHttpBackend.py
 			repo_uri_marker = command_options['repo_uri_marker'],
 			performance_settings = {
 				'repo_auto_create':True,
-				'gzip_response':True
+				'gzip_response':False
 				}
 		)
 
 		# default Python's WSGI server. Replace with your choice of WSGI server
 		from wsgiref import simple_server
-		httpd = simple_server.make_server('',int(command_options['port']),app)
+		httpd = simple_server.make_server('localhost',int(command_options['port']),app)
 		if command_options['repo_uri_marker']:
 			_s = 'url fragment "/%s/"' % command_options['repo_uri_marker']
 		else:
