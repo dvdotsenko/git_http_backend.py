@@ -589,7 +589,6 @@ class GitHTTPBackendSmartHTTP(GitHTTPBackendBase):
         stdout, stderr, exit_code = self.get_command_output(
                 r'git %s --stateless-rpc "%s"' % (git_command[4:], repo_path)
                 , stdin = stdin
-                , stderr = -1
                 )
         stdin.close()
         del stdin
