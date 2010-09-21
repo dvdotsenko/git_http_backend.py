@@ -26,13 +26,13 @@ You should have received a copy of the GNU Lesser General Public License
 along with git_http_backend.py Project.  If not, see <http://www.gnu.org/licenses/>.
 '''
 import os
-
+import io
 import subprocess
 import tempfile
-try:
-    import gzip
-except:
-    gzip = False
+#try:
+#    import gzip
+#except:
+#    gzip = False
 from wsgiref.headers import Headers
 
 # needed for WSGI Selector
@@ -121,17 +121,17 @@ class BaseWSGIClass(object):
         # that i would not have to relocate data from tempfile to gzip temp file, but
         # subprocess.Popen(... stdout = gzIO, ...) spills both, compressed and uncompressed
         # command output into gzIO's underlying fileno. Ugh! You just can't do the right thing around here...
-        if self.gzip_response and gzip and bool( (environ.get('HTTP_ACCEPT_ENCODING') or '').find('gzip') > -1 ):
-            outIO.seek(0,2)
-            if outIO.tell() > 1024:
-                _file_out = tempfile.SpooledTemporaryFile(max_size=self.tmp_file_buffer_size, mode='w+b')
-                _zfile = gzip.GzipFile(mode = 'wb',  fileobj = _file_out)
-                outIO.seek(0)
-                _zfile.writelines(outIO)
-                _zfile.close()
-                outIO.close()
-                outIO = _file_out
-                headersIface['Content-Encoding'] = 'gzip'
+#        if self.gzip_response and gzip and bool( (environ.get('HTTP_ACCEPT_ENCODING') or '').find('gzip') > -1 ):
+#            outIO.seek(0,2)
+#            if outIO.tell() > 1024:
+#                _file_out = tempfile.SpooledTemporaryFile(max_size=self.tmp_file_buffer_size, mode='w+b')
+#                _zfile = gzip.GzipFile(mode = 'wb',  fileobj = _file_out)
+#                outIO.seek(0)
+#                _zfile.writelines(outIO)
+#                _zfile.close()
+#                outIO.close()
+#                outIO = _file_out
+#                headersIface['Content-Encoding'] = 'gzip'
 
         outIO.seek(0)
 
@@ -389,15 +389,14 @@ class GitHTTPBackendBase(BaseWSGIClass):
         else:
             _internal_stderr = False
 
-        _c = subprocess.Popen(cmd, bufsize = 1, stdin = stdin, stdout = stdout, stderr = stderr)
-        _return_code = _c.wait()
+        _c = subprocess.Popen(cmd, bufsize = -1, stdin = stdin, stdout = stdout, stderr = stderr)
         if _internal_stdin:
             _c.stdin.close()
+        _return_code = _c.wait()
         if _internal_stderr:
-            if _c.stderr.tell():
-                _c.stderr.read()
+            stderr = _c.stderr
 
-        return stdout, stderr, _return_code
+        return stdout, stderr , _return_code
 
     def basic_checks(self, dataObj, environ, start_response):
         '''
@@ -474,7 +473,7 @@ class GitHTTPBackendBase(BaseWSGIClass):
         dataObj['repo_path'] = repo_path
         return None
 
-class GitInfoRefsHandler(GitHTTPBackendBase):
+class GitHTTPBackendInfoRefs(GitHTTPBackendBase):
     '''
     Implementation of a WSGI handler (app) specifically capable of responding
     to git-http-backend (Git Smart HTTP) /info/refs call over HTTP GET.
@@ -528,7 +527,7 @@ class GitInfoRefsHandler(GitHTTPBackendBase):
             return self.canned_handlers(environ, start_response, 'execution_failed')
         return self.package_response(stdout, environ, start_response, headers)
 
-class SmartHTTPRPCHandler(GitHTTPBackendBase):
+class GitHTTPBackendSmartHTTP(GitHTTPBackendBase):
     '''
     Implementation of a WSGI handler (app) specifically capable of responding
     to git-http-backend (Git Smart HTTP) RPC calls sent over HTTP POST.
@@ -637,8 +636,8 @@ def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = '', performance_s
 
     selector = WSGIHandlerSelector()
     generic_handler = StaticWSGIServer(**settings)
-    git_inforefs_handler = GitInfoRefsHandler(**settings)
-    git_rpc_handler = SmartHTTPRPCHandler(**settings)
+    git_inforefs_handler = GitHTTPBackendInfoRefs(**settings)
+    git_rpc_handler = GitHTTPBackendSmartHTTP(**settings)
 
     if repo_uri_marker:
         marker_regex = r'(?P<decorative_path>.*?)(?:/'+ repo_uri_marker + ')'
@@ -734,7 +733,6 @@ c:\tools\git_http_backend\GitHttpBackend.py
 	 http://localhost/.git/
 	This allows GitHttpBackend.py to be "self-serving" :)
 '''
-    import os
     import sys
 
     command_options = {
