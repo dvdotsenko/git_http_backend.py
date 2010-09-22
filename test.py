@@ -1,5 +1,4 @@
 import sys
-import unittest
 import git_http_backend.GitHttpBackend
 import wsgiref.simple_server
 import threading
@@ -83,7 +82,9 @@ def test_smarthttp(url, base_path):
     os.mkdir(repo_one_path)
     os.chdir(repo_one_path)
     subprocess.call('git init')
-    open(os.path.join(repo_one_path, file_name), 'w').write(line_one)
+    f = open(file_name, 'w')
+    f.write(line_one)
+    f.close()
     subprocess.call('git add %s' % file_name)
     subprocess.call('git commit -m "Initial import"')
     subprocess.call('git push http://%s/centralrepo master' % url)
@@ -98,7 +99,9 @@ def test_smarthttp(url, base_path):
     print "lines are %s" % lines
     assert(line_one in lines)
     lines.append(line_two)
-    open(file_name,'w').writelines(lines)
+    f = open(file_name, 'w')
+    f.writelines(lines)
+    f.close()
     subprocess.call('git add %s' % file_name)
     subprocess.call('git commit -m "Changing the file"')
     subprocess.call('git push origin master')
@@ -134,6 +137,7 @@ def client_only(base_path, url):
     except KeyboardInterrupt:
         pass
     finally:
+        pass
         shutil.rmtree(base_path, True)
 
 if __name__ == "__main__":
