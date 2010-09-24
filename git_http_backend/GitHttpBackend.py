@@ -26,13 +26,23 @@ You should have received a copy of the GNU Lesser General Public License
 along with git_http_backend.py Project.  If not, see <http://www.gnu.org/licenses/>.
 '''
 import os
-import io
-import subprocess
+import sys
+
+# we are using a custom version of subprocess.Popen - PopenIO 
+# with communicateIO() method that starts reading into mem
+# and switches to hard-drive persistence after mem threshold is crossed.
+if sys.platform == 'cli':
+    import subprocessio.subprocessio_ironpython as subprocess
+else:
+    import subprocess
+
+try:
+    # will fail on cPython
+    t = subprocess.PopenIO
+except:
+    import subprocessio.subprocessio as subprocess
+
 import tempfile
-#try:
-#    import gzip
-#except:
-#    gzip = False
 from wsgiref.headers import Headers
 
 # needed for WSGI Selector
@@ -134,12 +144,24 @@ class BaseWSGIClass(object):
 #                headersIface['Content-Encoding'] = 'gzip'
 
         outIO.seek(0)
-
+        retobj = outIO
+        try:
+            t = outIO.fileno
+            if 'wsgi.file_wrapper' in environ:
+                retobj = environ['wsgi.file_wrapper']( outIO, self.block_size )
+        except AttributeError:
+            pass
+# # Commenting this out. 
+# # Although it's recommended in wsgi docs, it blows up on NWSGI with non-file file-likes
+# # Until nwsgi is fixed, will just rely on object's native .next() method for iteration.
+#        if retobj == outIO:
+#            try:
+#                t = outIO.read
+#                retobj = iter( lambda: outIO.read(self.block_size), '' )
+#            except AttributeError:
+#                pass
         start_response("200 OK", headers)
-        if 'wsgi.file_wrapper' in environ:
-            return environ['wsgi.file_wrapper']( outIO, self.block_size )
-        else:
-            return iter( lambda: outIO.read(self.block_size), '' )
+        return retobj
 
 class WSGIHandlerSelector(BaseWSGIClass):
     """
@@ -348,7 +370,7 @@ class StaticWSGIServer(BaseWSGIClass):
 
 class GitHTTPBackendBase(BaseWSGIClass):
     git_folder_signature = set(['config', 'head', 'info', 'objects', 'refs'])
-    repo_auto_create = False
+    repo_auto_create = True
 
     def has_access(self, **kw):
         '''
@@ -373,30 +395,21 @@ class GitHTTPBackendBase(BaseWSGIClass):
         Returns rewound IO-like object with output, errorOut fileIO-like object
         and a command exit code
         '''
-
-        if not stdin:
-            stdin = subprocess.PIPE
-            _internal_stdin = True
-        else:
-            _internal_stdin = False
-
-        if not stdout:
-            stdout = tempfile.SpooledTemporaryFile(max_size=self.tmp_file_buffer_size, mode='w+b')
-
-        if not stderr:
-            stderr = subprocess.PIPE
-            _internal_stderr = True
-        else:
-            _internal_stderr = False
-
-        _c = subprocess.Popen(cmd, bufsize = -1, stdin = stdin, stdout = stdout, stderr = stderr)
-        if _internal_stdin:
-            _c.stdin.close()
-        _return_code = _c.wait()
-        if _internal_stderr:
-            stderr = _c.stderr
-
-        return stdout, stderr , _return_code
+        if type(stdin) in (type(''), bytes, bytearray, None):
+            _i = subprocess.PIPE
+            _i_stringlike = stdin
+        else: # file-like or file descriptor
+            _i = stdin
+            _i_stringlike = None
+        _o = stdout or subprocess.PIPE
+        _e = stderr or subprocess.PIPE
+        _p = subprocess.PopenIO(cmd, bufsize = -1, stdin = _i, stdout = _o, stderr = _e)
+        __o, __e = _p.communicateIO(_i_stringlike)
+        # the "or" magic may need to be explained:
+        # depending on the non-None-ness of std* aargs, __o and __e may, or may
+        # not be non-None. If __e or __o are non-None, they are, for sure IO-likes
+        # else, _o and _e are for sure IO-likes that will contain the output.
+        return __o or _o, __e or _e, _p.returncode
 
     def basic_checks(self, dataObj, environ, start_response):
         '''
@@ -509,19 +522,16 @@ class GitHTTPBackendInfoRefs(GitHTTPBackendBase):
         # if you sprinkle "flush" (0000) as "0001\n".
         # It reads binary, per number of bytes specified.
         # if you do add '\n' as part of data, count it.
-        stdout = tempfile.SpooledTemporaryFile(max_size=self.tmp_file_buffer_size, mode='w+b')
+        stdout = tempfile.TemporaryFile()
         smart_server_advert = '# service=%s' % git_command
         stdout.write(hex(len(smart_server_advert)+4)[2:].rjust(4,'0') + smart_server_advert)
         stdout.write('0000')
-
+        stdout.flush()
         stdout, stderr, exit_code = self.get_command_output(
                 r'git %s --stateless-rpc --advertise-refs "%s"' % (git_command[4:], repo_path)
-                , stdin = -1
-                , stdout=stdout
-                , stderr = -1
+                , stdout = stdout
                 )
         headers = [('Content-type','application/x-%s-advertisement' % str(git_command))]
-
         if exit_code: # non-zero value = error
             stdout.close()
             return self.canned_handlers(environ, start_response, 'execution_failed')

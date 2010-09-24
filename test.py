@@ -2,7 +2,10 @@ import sys
 import git_http_backend.GitHttpBackend
 import wsgiref.simple_server
 import threading
-import subprocess
+if sys.platform == 'cli':
+    import subprocessio.subprocessio_ironpython as subprocess
+else:
+    import subprocess
 import socket
 import tempfile
 import shutil
@@ -117,7 +120,7 @@ def test_smarthttp(url, base_path):
 
 def server_and_client(base_path):
     remote_base_path = os.path.join(base_path, 'reporemote')
-    server_thread, control, ip, port = set_up_server(remote_base_path)
+    server_thread, control, ip, port = set_up_server(remote_base_path, True)
     test_smarthttp('%s:%s' % (ip, port), base_path)
     shutil.rmtree(base_path, True)
     kill_server(server_thread, control, ip, port)

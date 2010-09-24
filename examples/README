@@ -6,3 +6,9 @@ This project's code is designed to fulfill several deployment scenarios. These a
 	- Microsoft IIS 6,7.x (ISAPI_WSGI + cPython, NWSGI + IronPython)
 
 See individual folders for deployment instructions.
+
+One general note:
+This project uses git submodules. If you pull this project with git, 
+please, ensure that after you do the 'git clone' you do:
+ git submodule init
+ git submodule update
