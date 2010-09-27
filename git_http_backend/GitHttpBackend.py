@@ -25,6 +25,7 @@ GNU Lesser General Public License for more details.
 You should have received a copy of the GNU Lesser General Public License
 along with git_http_backend.py Project.  If not, see <http://www.gnu.org/licenses/>.
 '''
+import io
 import os
 import sys
 
@@ -61,8 +62,7 @@ __version__=(1,7,0,4) # the number has no significance for this code's functiona
 # The number means "I was looking at sources of that version of Git while coding"
 
 class BaseWSGIClass(object):
-    tmp_file_buffer_size = 32767 # bytes. boundary between memory-resident and file-swapped tempfile.
-    block_size = 65536
+    bufsize = 65536
     gzip_response = False
     canned_collection = {
         '304': '304 Not Modified',
@@ -83,6 +83,8 @@ class BaseWSGIClass(object):
         '417':'417 Execution failed',
         'execution_failed':'417 Execution failed',
         '200': "200 OK",
+        '501': "501 Not Implemented",
+        'not_implemented': "501 Not Implemented"
     }
 
     def canned_handlers(self, environ, start_response, code = '200', headers = []):
@@ -134,7 +136,7 @@ class BaseWSGIClass(object):
 #        if self.gzip_response and gzip and bool( (environ.get('HTTP_ACCEPT_ENCODING') or '').find('gzip') > -1 ):
 #            outIO.seek(0,2)
 #            if outIO.tell() > 1024:
-#                _file_out = tempfile.SpooledTemporaryFile(max_size=self.tmp_file_buffer_size, mode='w+b')
+#                _file_out = tempfile.SpooledTemporaryFile(max_size=self.bufsize, mode='w+b')
 #                _zfile = gzip.GzipFile(mode = 'wb',  fileobj = _file_out)
 #                outIO.seek(0)
 #                _zfile.writelines(outIO)
@@ -143,23 +145,17 @@ class BaseWSGIClass(object):
 #                outIO = _file_out
 #                headersIface['Content-Encoding'] = 'gzip'
 
-        outIO.seek(0)
-        retobj = outIO
-        try:
-            t = outIO.fileno
+        methods = dir(outIO)
+        if 'fileno' in methods:
+            outIO.seek(0)
             if 'wsgi.file_wrapper' in environ:
-                retobj = environ['wsgi.file_wrapper']( outIO, self.block_size )
-        except AttributeError:
-            pass
-# # Commenting this out. 
-# # Although it's recommended in wsgi docs, it blows up on NWSGI with non-file file-likes
-# # Until nwsgi is fixed, will just rely on object's native .next() method for iteration.
-#        if retobj == outIO:
-#            try:
-#                t = outIO.read
-#                retobj = iter( lambda: outIO.read(self.block_size), '' )
-#            except AttributeError:
-#                pass
+                retobj = environ['wsgi.file_wrapper']( outIO, self.bufsize )
+        # this does not work well on NWSGI
+        elif 'read' in methods:
+            outIO.seek(0)
+            retobj = iter( lambda: outIO.read(self.bufsize), '' )
+        else:
+            retobj = outIO
         start_response("200 OK", headers)
         return retobj
 
@@ -255,6 +251,12 @@ class WSGIHandlerSelector(BaseWSGIClass):
             a = environ['WSGIHandlerSelector.canned_handlers']
             return a('404', environ, start_response, headers = headerList)
         """
+
+#        chunked = environ.get('HTTP_TRANSFER_ENCODING', '').decode('utf8')
+#        environ['SERVER_PROTOCOL'] = 'HTTP/1.0'
+#        if chunked:
+#            return self.canned_handlers(environ, start_response, 'not_implemented')
+
         path = environ.get('PATH_INFO', '').decode('utf8')
 
         matches = None
@@ -320,7 +322,7 @@ class StaticWSGIServer(BaseWSGIClass):
             path_prefix (mandatory)
                 String containing a file-system level path behaving as served root.
 
-            block_size (optional)
+            bufsize (optional)
                 File reader's buffer size. Defaults to 65536.
 
             gzip_response (optional) (must be named arg)
@@ -390,26 +392,22 @@ class GitHTTPBackendBase(BaseWSGIClass):
         command_output(cmd,stdin,stdout,stderr)
 
         stdin,stdout,stderr (optional)
-         FileIO-like objects. Default tempfile.SpooledTemporaryFile()
+         FileIO-like, fd's or in case of stdin, string objects.
 
-        Returns rewound IO-like object with output, errorOut fileIO-like object
-        and a command exit code
+        Returns None or File-Like out and error objects,
+        and int return code as a tuple: (out, error, return_code)
         '''
-        if type(stdin) in (type(''), bytes, bytearray, None):
-            _i = subprocess.PIPE
-            _i_stringlike = stdin
-        else: # file-like or file descriptor
-            _i = stdin
-            _i_stringlike = None
         _o = stdout or subprocess.PIPE
         _e = stderr or subprocess.PIPE
-        _p = subprocess.PopenIO(cmd, bufsize = -1, stdin = _i, stdout = _o, stderr = _e)
-        __o, __e = _p.communicateIO(_i_stringlike)
+        _p = subprocess.PopenIO(cmd, bufsize = -1, stdin = subprocess.PIPE, stdout = _o, stderr = _e)
+        o, e = _p.communicateIO(stdin)
         # the "or" magic may need to be explained:
-        # depending on the non-None-ness of std* aargs, __o and __e may, or may
-        # not be non-None. If __e or __o are non-None, they are, for sure IO-likes
-        # else, _o and _e are for sure IO-likes that will contain the output.
-        return __o or _o, __e or _e, _p.returncode
+        # depending on the non-None-ness of std* aargs, outputs may be None even
+        # if there was some output of that type. These could have been diverted
+        # to stdout, stderr. If e or o are non-None, they are, for sure IO-likes
+        # else, stdout and stderr are for sure IO-likes, file-descriptor or None.
+        # as a result, each of out, error returned elems could be: None, fd, or file-like.
+        return o or stdout, e or stderr, _p.returncode
 
     def basic_checks(self, dataObj, environ, start_response):
         '''
@@ -500,7 +498,7 @@ class GitHTTPBackendInfoRefs(GitHTTPBackendBase):
         '''
         inputs:
             path_prefix (Mandatory) - Local file system path = root of served files.
-            block_size (Default = 65536) Chunk size for WSGI file feeding
+            bufsize (Default = 65536) Chunk size for WSGI file feeding
             gzip_response (Default = False) Compress response body
         '''
         self.__dict__.update(kw)
@@ -522,20 +520,24 @@ class GitHTTPBackendInfoRefs(GitHTTPBackendBase):
         # if you sprinkle "flush" (0000) as "0001\n".
         # It reads binary, per number of bytes specified.
         # if you do add '\n' as part of data, count it.
-        stdout = tempfile.TemporaryFile()
         smart_server_advert = '# service=%s' % git_command
-        stdout.write(hex(len(smart_server_advert)+4)[2:].rjust(4,'0') + smart_server_advert)
-        stdout.write('0000')
-        stdout.flush()
+        out = [ str(hex(len(smart_server_advert)+4)[2:].rjust(4,'0') + smart_server_advert + '0000') ]
         stdout, stderr, exit_code = self.get_command_output(
                 r'git %s --stateless-rpc --advertise-refs "%s"' % (git_command[4:], repo_path)
-                , stdout = stdout
                 )
         headers = [('Content-type','application/x-%s-advertisement' % str(git_command))]
         if exit_code: # non-zero value = error
-            stdout.close()
             return self.canned_handlers(environ, start_response, 'execution_failed')
-        return self.package_response(stdout, environ, start_response, headers)
+        if stdout:
+            stdout.seek(0)
+            out.append(str(stdout.read()))
+        del stdout
+        del stderr
+        return self.package_response(
+            out,
+            environ,
+            start_response,
+            headers)
 
 class GitHTTPBackendSmartHTTP(GitHTTPBackendBase):
     '''
@@ -555,7 +557,7 @@ class GitHTTPBackendSmartHTTP(GitHTTPBackendBase):
             Local file system path = root of served files.
         optional parameters may be passed as named arguments
             These include
-                block_size (Default = 65536) Chunk size for WSGI file feeding
+                bufsize (Default = 65536) Chunk size for WSGI file feeding
                 gzip_response (Default = False) Compress response body
         '''
         self.__dict__.update(kw)
@@ -582,29 +584,54 @@ class GitHTTPBackendSmartHTTP(GitHTTPBackendBase):
         repo_path = dataObj['repo_path']
 
         # transferring the contents of HTML request body into a temp file.
-        #  You might be thinking "why not just pass the wsgi.input IO object as stdin?"
-        #  All IO objects, except for real STDIN must have filename property for
-        #  subprocess.Popen() to work. When / if that's fixed, you could try passing wsgi.input
-        #  direcltly to subprocess.Popen() as stdin
-        _l = int(environ.get('CONTENT_LENGTH') or 0)
-        if _l > self.tmp_file_buffer_size or _l == -1:
-            _max_size = self.tmp_file_buffer_size
-        else:
-            _max_size = _l + 128
+        #  per PEP 333, 'wsgi.input' has no end. read only as many bytes
+        #  as CONTENT_LENGTH prescribes.
+        #  This means we cannot just let subprocess read from wsgi.input
+        #  no wroky, i tried.
         _i = environ.get('wsgi.input')
-        stdin = tempfile.SpooledTemporaryFile(max_size=_max_size, mode='w+b')
-        stdin.write(_i.read(_l))
-        stdin.seek(0)
+        _l = int(environ.get('CONTENT_LENGTH') or 0)
+
+        # Testing implementation of "chunked" transfer encoding. remove for production.
+        chunked = environ.get('HTTP_TRANSFER_ENCODING', '')
+        if chunked:
+            logfile = open('\\tmp\\wsgilog.txt', 'a')
+            logfile.write("Detected Transfer Encoding header. Content Len is: %s" % _l )
+            if _l == 0:
+                logfile.write("======================================================")
+                for key in sorted(environ.keys()):
+                    logfile.write('%s = %s\n' % (key, unicode(environ[key]).encode('utf8') ))
+                logfile.write("======================================================")
+            logfile.close()
+            return self.canned_handlers(environ, start_response, 'not_implemented')
+        if _l > self.bufsize:
+            bs = self.bufsize
+            btr = _l
+            stdin = tempfile.TemporaryFile()
+            while btr >= bs:
+                stdin.write(_i.read(bs))
+                btr -= bs
+            stdin.write(_i.read(btr))
+            stdin.flush()
+            stdin.seek(0)
+        elif _l == 0:
+            stdin = None
+        else: # between zero and max memory buffer size
+            stdin = _i.read(_l)
 
         stdout, stderr, exit_code = self.get_command_output(
-                r'git %s --stateless-rpc "%s"' % (git_command[4:], repo_path)
-                , stdin = stdin
-                )
-        stdin.close()
+            r'git %s --stateless-rpc "%s"' % (git_command[4:], repo_path)
+            , stdin = stdin
+            )
         del stdin
+        del stderr
+
+        if stdout:
+            print "Length of response is %s" % stdout.tell()
+        else:
+            print "STDOUT is None"
 
         if exit_code: # non-zero value = error
-            stdout.close()
+            del stdout
             return self.canned_handlers(environ, start_response, 'execution_failed')
         elif git_command in [u'git-receive-pack']:
             # updating refs manually after each push. Needed for pre-1.7.0.4 git clients using regular HTTP mode.

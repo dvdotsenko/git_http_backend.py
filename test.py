@@ -9,6 +9,7 @@ else:
 import socket
 import tempfile
 import shutil
+import random
 try:
     # 3.x style module
     import urllib.request as urlopenlib
@@ -78,7 +79,7 @@ def test_smarthttp(url, base_path):
     line_one = 'This is a test\n'
     line_two = 'Another line\n'
     file_name = 'testfile.txt'
-
+    large_file_name = 'largetestfile.bin'
     ip = 'localhost'
     # create local repo
     print("== creating first local repo and adding content ==")
@@ -105,7 +106,13 @@ def test_smarthttp(url, base_path):
     f = open(file_name, 'w')
     f.writelines(lines)
     f.close()
-    subprocess.call('git add %s' % file_name)
+    f = open(large_file_name, 'wb')
+    size = 1000000 # x10 chars = 1 meg
+    while size:
+        f.write(chr(random.randrange(0,255)))
+        size -= 1
+    f.close()
+    subprocess.call('git add %s %s' % (file_name, large_file_name))
     subprocess.call('git commit -m "Changing the file"')
     subprocess.call('git push origin master')
     os.chdir('..')
@@ -113,9 +120,8 @@ def test_smarthttp(url, base_path):
     print("== pulling to first local repo and verifying added content ==")
     os.chdir(repo_one_path)
     subprocess.call('git pull http://%s/centralrepo master' % url)
-    assert(file_name in os.listdir('.'))
-    lines = open(file_name).readlines()
-    assert(set([line_one,line_two]).issubset(lines))
+    assert(set([file_name,large_file_name]).issubset(os.listdir('.')))
+    assert(set([line_one,line_two]).issubset(open(file_name).readlines()))
     print("=============\n== SUCCESS ==\n=============\n")
 
 def server_and_client(base_path):
