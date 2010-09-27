@@ -1,5 +1,5 @@
 import sys
-import git_http_backend.GitHttpBackend
+import git_http_backend
 import wsgiref.simple_server
 import threading
 if sys.platform == 'cli':
@@ -39,7 +39,7 @@ def set_up_server(remote_base_path, threaded = True):
     s = wsgiref.simple_server.make_server(
         ip,
         port,
-        git_http_backend.GitHttpBackend.assemble_WSGI_git_app(
+        git_http_backend.assemble_WSGI_git_app(
             remote_base_path,
             '',
             {
