@@ -702,10 +702,10 @@ def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = '', performance_s
     else:
         marker_regex = ''
 
-    selector.add(
-        marker_regex + r'/showvars',
-        ShowVarsWSGIApp()
-        )
+#    selector.add(
+#        marker_regex + r'/showvars',
+#        ShowVarsWSGIApp()
+#        )
     selector.add(
         marker_regex + r'(?P<working_path>.*?)/info/refs\?.*?service=(?P<git_command>git-[^&]+).*$',
         GET = git_inforefs_handler,
@@ -722,16 +722,15 @@ def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = '', performance_s
 
     return selector
 
-class ShowVarsWSGIApp(object):
-    def __init__(self, *args, **kw):
-        pass
-    def __call__(self, environ, start_response):
-        status = '200 OK'
-        response_headers = [('Content-type','text/plain')]
-        start_response(status, response_headers)
-        for key in sorted(environ.keys()):
-            yield '%s = %s\n' % (key, unicode(environ[key]).encode('utf8'))
-
+#class ShowVarsWSGIApp(object):
+#    def __init__(self, *args, **kw):
+#        pass
+#    def __call__(self, environ, start_response):
+#        status = '200 OK'
+#        response_headers = [('Content-type','text/plain')]
+#        start_response(status, response_headers)
+#        for key in sorted(environ.keys()):
+#            yield '%s = %s\n' % (key, unicode(environ[key]).encode('utf8'))
 
 if __name__ == "__main__":
     _help = r'''
@@ -813,7 +812,6 @@ c:\tools\git_http_backend\GitHttpBackend.py
             'repo_uri_marker' : '',
             'port' : '8080'
         }
-
     lastKey = None
     for item in sys.argv:
         if item.startswith('--'):
@@ -832,24 +830,43 @@ c:\tools\git_http_backend\GitHttpBackend.py
             path_prefix = path_prefix,
             repo_uri_marker = command_options['repo_uri_marker'],
             performance_settings = {
-                'repo_auto_create':True,
-                'gzip_response':False
+                'repo_auto_create':True
                 }
         )
 
         # default Python's WSGI server. Replace with your choice of WSGI server
-        from wsgiref import simple_server
-        httpd = simple_server.make_server('localhost',int(command_options['port']),app)
+        from cherrypy import wsgiserver
+        httpd = wsgiserver.CherryPyWSGIServer(('0.0.0.0',int(command_options['port'])),app)
+
         if command_options['repo_uri_marker']:
-            _s = 'url fragment "/%s/"' % command_options['repo_uri_marker']
+            _s = '"/%s/".' % command_options['repo_uri_marker']
+            example_URI = '''http://localhost:%s/whatever/you/want/here/%s/myrepo.git
+    (Note: "whatever/you/want/here" cannot include the "/%s/" segment)''' % (
+            command_options['port'],
+            command_options['repo_uri_marker'],
+            command_options['repo_uri_marker'])
         else:
-            _s = 'nothing.'
+            _s = 'not chosen.'
+            example_URI = 'http://localhost:%s/myrepo.git' % (command_options['port'])
         print '''
+===========================================================================
+Run this command with "--help" option to see available command-line options
+
 Starting git-http-backend server...
 	Port: %s
-	Base file system path: %s
-	Repo url must be prefixed by %s''' % (command_options['port'], path_prefix, _s)
+	Chosen repo folders' base file system path: %s
+	URI segment indicating start of git repo foler name is %s
+
+Example repo url would be:
+    %s
+
+Use Keyboard Interrupt key combination (usually CTRL+C) to stop the server
+===========================================================================
+''' % (command_options['port'], path_prefix, _s, example_URI)
+
         try:
-            httpd.serve_forever()
+            httpd.start()
         except KeyboardInterrupt:
             pass
+        finally:
+            httpd.stop()
