@@ -163,6 +163,31 @@ class WSGIHandlerSelector(BaseWSGIClass):
     """
     WSGI middleware for URL paths and HTTP method based delegation.
 
+    This middleware is commonly called a "selector" or "router."
+
+    Features:
+
+    Regex-based patterns:
+    Normally these are implemented as meta-url-language-to-regex
+    translators, where you describe a URI matching pattern in
+    URI-looking way, with regex-like pattern group name areas.
+    These later are converted to plain regex by the selector's code.
+    Since you need to learn that meta-URI-matching-language and
+    have the usual routers translate those to regex, I have decided
+    to cut out the middle-man and just define the URI patterns in
+    regex from the start.
+    This way a WSGI app programmer needs to learn only one meta-URI-matching
+    language - standard Python regex. Thus, the insanity should stop here.
+
+    Support for matching based on HTTP verb:
+    Want to handle POSTs and GETs on the same URI by different wsgi app? Sure!
+
+    Support for routing based on URI query parameters:
+    Want "host/app?special_arg=value" to be routed to different wsgi app
+    compared to "host/app?other_arg=value" or "host/app"? Sure!
+
+    See documentation for .add() method for examples.
+
     Based on Selector from http://lukearno.com/projects/selector/
 
     Copyright (c) 2010 Daniel Dotsenko <dotsa@hotmail.com>
@@ -176,7 +201,7 @@ class WSGIHandlerSelector(BaseWSGIClass):
         WSGIHandlerSelector(WSGI_env_key = 'WSGIHandlerSelector')
 
         Inputs:
-         WSGI_env_key (optional) (must be named arg)
+         WSGI_env_key (optional)
           name of the key selector injects into WSGI's environ.
           The key will be the base for other dicts, like .matches - the key-value pairs of
           name-matchedtext matched groups. Defaults to 'WSGIHandlerSelector'
@@ -190,39 +215,55 @@ class WSGIHandlerSelector(BaseWSGIClass):
 
         add(path, default_handler, **named_handlers)
 
+        Adding order is important. Firt added = first matched.
+        If you want to hand special case URI handled by one app and shorter
+        version of the same regex string by anoter app,
+        .add() special case first.
+
         Inputs:
          path - A regex string. We will compile it.
           Highly recommend using grouping of type: "(?P<groupname>.+)"
-          These will be exposed to WSGI app through environment key.
+          These will be exposed to WSGI app through environment key
+          per http://www.wsgi.org/wsgi/Specifications/routing_args
 
          default_handler - (optional) A pointer to the function / iterable
           class instance that will handle ALL HTTP methods (verbs)
 
-         **named_handlers - (optional) An unpacked dict of handlers allocated
-          to handle specific HTTP methods (HTTP verbs). See "Examples" below.
+         **named_handlers - (optional) An unlimited list of named args or
+          an unpacked dict of handlers allocated to handle specific HTTP
+          methods (HTTP verbs). See "Examples" below.
 
         Matched named method handlers override default handler.
 
         If neither default_handler nor named_handlers point to any methods,
-        "Method not implemented" is returned for the requests.
+        "Method not implemented" is returned for the requests on this URI.
 
         Examples:
-            .add('^(?P<working_path>.*)$',generic_handler,
+        selectorInstance.add('^(?P<working_path>.*)$',generic_handler,
                               POST=post_handler, HEAD=head_handler)
 
-        If you want to expand "custom_assembled" mapping dict
-         like {'GET':a,'POST':b}:
-            .add('^(?P<working_path>.*)$', **custom_assembled_dict)
+        custom_assembled_dict = {'GET':wsgi_app_a,'POST':wsgi_app_b}:
+        ## note the unpacking - "**" - of the dict in this case.
+        selectorInstance.add('^(?P<working_path>.*)$', **custom_assembled_dict)
 
-        If the string contains '\?' - which translates to '?' for non-regex
-        strings, we understand that as "match on QUERY_PATH + '?' + QUERY_STRING"
+
+        If the string contains '\?' (escaped ?, which translates to '?' in
+        non-regex strings) we understand that as "do regex matching on
+        QUERY_PATH + '?' + QUERY_STRING"
 
         When lookup matches are met, results are injected into
         environ['wsgiorg.routing_args'] per
         http://www.wsgi.org/wsgi/Specifications/routing_args
         """
+
+        class default_retriever(object):
+            def __init__(self,obj):
+                self.obj = obj
+            def __call__(self):
+                return self.obj
+
         if default_handler:
-            methods = defaultdict(default_handler, http_methods.copy())
+            methods = defaultdict(default_retriever(default_handler), http_methods.copy())
         else:
             methods = http_methods.copy()
         self.mappings.append((re.compile(path.decode('utf8')), methods, (path.find(r'\?')>-1) ))
@@ -238,24 +279,11 @@ class WSGIHandlerSelector(BaseWSGIClass):
             http://www.wsgi.org/wsgi/Specifications/routing_args
 
         WSGIHandlerSelector.matched_request_methods
-            It's a list of strings denoting other HTTP methods the matched URI
-            (not chosen handler!) accepts for processing.
+            It's a list of strings denoting other HTTP verbs / methods the
+            matched URI (not chosen handler!) accepts for processing.
+            This matters when
 
-        WSGIHandlerSelector.canned_handlers
-            Pointer to WSGI-like app. It serves "canned," WSGI-compatible HTTP
-            responses based on specified codes. See CannedHTTPHandlers class for
-            list of supported error codes, or query (a static dict) call like:
-                CannedHTTPHandlers.collection.keys()
-
-            Example:
-            a = environ['WSGIHandlerSelector.canned_handlers']
-            return a('404', environ, start_response, headers = headerList)
         """
-
-#        chunked = environ.get('HTTP_TRANSFER_ENCODING', '').decode('utf8')
-#        environ['SERVER_PROTOCOL'] = 'HTTP/1.0'
-#        if chunked:
-#            return self.canned_handlers(environ, start_response, 'not_implemented')
 
         path = environ.get('PATH_INFO', '').decode('utf8')
 
@@ -268,7 +296,7 @@ class WSGIHandlerSelector(BaseWSGIClass):
         # turns garbage like this: r'//qwre/asdf/..*/*/*///.././../qwer/./..//../../.././//yuioghkj/../wrt.sdaf'
         # into something like this: /../../wrt.sdaf
         path = urlparse.urljoin(u'/', re.sub('//+','/',path.strip('/')))
-        if not path.startswith('/../'):
+        if not path.startswith('/../'): # meaning, if it's not a trash path
             for _regex, _registered_methods, _use_query_string in self.mappings:
                 if _use_query_string:
                     matches = _regex.search(path + '?' + query_string)
@@ -276,11 +304,11 @@ class WSGIHandlerSelector(BaseWSGIClass):
                     matches = _regex.search(path)
 
                 if matches:
-                    if _registered_methods.get(environ['REQUEST_METHOD']):
-                        # note, there is a chance that 'methods' is an instance of
-                        # collections.defaultdict, which means if default handler was
-                        # defined it will be returned for all unmatched HTTP methods.
-                        handler = _registered_methods.get(environ['REQUEST_METHOD'])
+                    # note, there is a chance that '_registered_methods' is an instance of
+                    # collections.defaultdict, which means if default handler was
+                    # defined it will be returned for all unmatched HTTP methods.
+                    handler = _registered_methods[environ.get('REQUEST_METHOD','')]
+                    if handler:
                         break
                     else:
                         alternate_HTTP_verbs.update(_registered_methods.keys())
