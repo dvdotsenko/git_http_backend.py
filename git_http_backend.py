@@ -109,53 +109,14 @@ class BaseWSGIClass(object):
         for header in newheaders:
             headersIface[header[0]] = '; '.join(header[1:])
 
-        # Per PEP333:
-        # "Similarly, a server may re-encode or transport-encode an application's response,
-        #  but the application should use a suitable *CONTENT* encoding on its own,
-        #  and must not apply a transport encoding."
-        #
-        # However, later it says:
-        # "(Note: applications and middleware must not apply any kind of Transfer-Encoding
-        #  to their output, such as chunking or *GZIPPING*; as "hop-by-hop" operations,
-        #  these encodings are the province of the actual web server/gateway."
-        #
-        # These two statements may be read as "we consider GZIPPING a domain of server,
-        #  despite of it being a "Content-Encoding" and not "Transfer-Encoding""
-        #
-        # i have a feeling that respectible WSGI server will be doing the un-gziping
-        # of the incoming request body transparently ang gives the body unpacked.
-        #
-        # However, depending on WSGI server, response could be gziped transparently as well or not.
-        # By default, we will forego compression here... Enable it by flipping the gzip_response to True
-        #  For intrAnet deployments, i wouldn't bother with it, as it eats up response and CPU time.
-
-        # also. I would love to feed the gzipIO obj as subprocess input pipe directly so
-        # that i would not have to relocate data from tempfile to gzip temp file, but
-        # subprocess.Popen(... stdout = gzIO, ...) spills both, compressed and uncompressed
-        # command output into gzIO's underlying fileno. Ugh! You just can't do the right thing around here...
-#        if self.gzip_response and gzip and bool( (environ.get('HTTP_ACCEPT_ENCODING') or '').find('gzip') > -1 ):
-#            outIO.seek(0,2)
-#            if outIO.tell() > 1024:
-#                _file_out = tempfile.SpooledTemporaryFile(max_size=self.bufsize, mode='w+b')
-#                _zfile = gzip.GzipFile(mode = 'wb',  fileobj = _file_out)
-#                outIO.seek(0)
-#                _zfile.writelines(outIO)
-#                _zfile.close()
-#                outIO.close()
-#                outIO = _file_out
-#                headersIface['Content-Encoding'] = 'gzip'
-
-        methods = dir(outIO)
-        if 'fileno' in methods:
+        retobj = outIO
+        if hasattr(outIO,'fileno') and 'wsgi.file_wrapper' in environ:
             outIO.seek(0)
-            if 'wsgi.file_wrapper' in environ:
-                retobj = environ['wsgi.file_wrapper']( outIO, self.bufsize )
-        # this does not work well on NWSGI
-        elif 'read' in methods:
+            retobj = environ['wsgi.file_wrapper']( outIO, self.bufsize )
+        # TODO: I think this does not work well on NWSGI 2.0. Talk to Jeff about this for 3.0
+        elif hasattr(outIO,'read'):
             outIO.seek(0)
             retobj = iter( lambda: outIO.read(self.bufsize), '' )
-        else:
-            retobj = outIO
         start_response("200 OK", headers)
         return retobj
 
@@ -302,7 +263,6 @@ class WSGIHandlerSelector(BaseWSGIClass):
                     matches = _regex.search(path + '?' + query_string)
                 else:
                     matches = _regex.search(path)
-
                 if matches:
                     # note, there is a chance that '_registered_methods' is an instance of
                     # collections.defaultdict, which means if default handler was
@@ -608,49 +568,82 @@ class GitHTTPBackendSmartHTTP(GitHTTPBackendBase):
             # presense of anything of truthiness in 'answer' = some ERROR have
             # already prepared a response and all I need to do is let go of the response.
             return answer
+
         git_command = dataObj['git_command']
         repo_path = dataObj['repo_path']
 
-        # transferring the contents of HTML request body into a temp file.
-        #  per PEP 333, 'wsgi.input' has no end. read only as many bytes
-        #  as CONTENT_LENGTH prescribes.
-        #  This means we cannot just let subprocess read from wsgi.input
-        #  no wroky, i tried.
-        _i = environ.get('wsgi.input')
-
-        # some clients may send no length of some "-1" garbage. Transfer-Encoding: chunked
         try:
-            _l = int(environ.get('CONTENT_LENGTH') or 0)
+            _l = int(environ.get('CONTENT_LENGTH',''))
         except:
-            _l = 0
-        if _l < 0:
-            _l = 0
+            _l = None
 
-        chunked = environ.get('HTTP_TRANSFER_ENCODING', '')
-        if chunked:
-#            logfile = open('\\tmp\\wsgilog.txt', 'a')
-#            logfile.write("Detected Transfer Encoding header." )
-#            if _l == 0:
-#                logfile.write("======================================================")
-#                for key in sorted(environ.keys()):
-#                    logfile.write('%s = %s\n' % (key, unicode(environ[key]).encode('utf8') ))
-#                logfile.write("======================================================")
-#            logfile.close()
-            return self.canned_handlers(environ, start_response, 'not_implemented')
-        if _l > self.bufsize:
-            bs = self.bufsize
-            btr = _l
-            stdin = tempfile.TemporaryFile()
-            while btr >= bs:
-                stdin.write(_i.read(bs))
-                btr -= bs
-            stdin.write(_i.read(btr))
-            stdin.flush()
-            stdin.seek(0)
-        elif _l == 0:
-            stdin = None
-        else: # between zero and max memory buffer size
-            stdin = _i.read(_l)
+        # Note, depending on the WSGI server, the following handlings of chunked
+        # request bodies are possible:
+        # 1. This is WSGI 1.0-only compliant server. wsgi.input.read() is bottomless
+        #    and Content-Length is absent.
+        #    If WSGI app is assuming no size header = size header is Zero, app will respond with wrong data.
+        #    (this code is not assuming None = zero data. We look deeper)
+        #    If WSGI app is chunked-aware, but respects WSGI 1.0 only,
+        #    it will reply with "501 Not Implemented"
+        # 2. This is WSGI 1.0-compliant server that tries to accommodate Transfer-Encoding: chunked
+        #    requests by caching the body and presenting it as wsgi.input file-like.
+        #    Content-Length header is set to captured size and Transfer-Encoding
+        #    header is removed. This is not per WSGI 1.0 spec, but is a good thing to do.
+        #    All WSGI 1.x apps are happy.
+        # 3. This is WSGI 1.1-compliant server that presents Transfer-Encoding: chunked
+        #    requests as a file-like that yields an EOF at the end.
+        #    Content-Length header is NOT set.
+        #    Only WSGI 1.1 apps are happy. WSGI 1.0 apps are confused by lack of
+        #    content-length header and blow up. (We are WSGI 1.1 app)
+
+        # any WSGI server that claims to be HTTP/1.1 compliant must deal with chunked
+        # If not #3 above, then #2 would be done by a self-respecting HTTP/1.1 server.
+
+        wsgi_version = environ.get('wsgi.version',(1,0))
+        if wsgi_version[0] >= 1 and wsgi_version[1] >= 1: # if it's 1.1 or higher.
+            wsgi_input_has_EOF = True
+        else:
+            wsgi_input_has_EOF = False
+            if _l is None or _l < 0: # signs of transfer-encoding: chunked
+                # So, no usable Content-Length value and the server is not WSGI 1.1 and above?
+                # Normal thought process:
+                # Is the server WSGI 1.1-compliant?
+                #  (I.e HTTP/1.1 + Chunked support + wsgi.input will send EOF
+                #   at the end and we don't have to think about Content-Length)
+                #  Yes - we forget about _l and just read from wsgi.input until EOF
+                #  No - We check if "Transfer-Encoding" header is set.
+                #       Yes, we send back 501 Not Implemented.
+                #       No, What error code? TBD. No point sending zero data as a pack to git.
+                # Note: There is another, tricky possibility:
+                #  The server is not advertized to be WSGI 1.1 compliant, but is advertized
+                #  to be HTTP/1.1 compliant, which would assume that it deals with chunked
+                #  body, and LIKELY caches it into a local file-like that will LIKELY emit EOF
+                #  However, in accordance with WSGI 1.0, the server would not set Content-Length.
+                #  This is dumb. How would we know it's safe to .read() wsgi.input to EOF?
+                #  If we assume HTTP/1.1 = "chunked body exposed
+                #  as wsgi.input that has EOF" and turn out to be wrong,
+                #  we will be trying to read from the wsgi.input indefinitely.
+                #  Ugh! I don't want to be guessing based on SERVER_PROTOCOL = HTTP/1.1 header.
+                #  Thus, only servers officially proclaiming WSGI v. > 1.0 compliance are
+                #  safely supported for Content-Length-less request reading.
+                return self.canned_handlers(environ, start_response, 'not_implemented')
+
+        _i = environ.get('wsgi.input')
+        if wsgi_input_has_EOF: # this is approximately equal "if server is WSGI 1.1 and above"
+            stdin = _i
+        else:
+            if _l > self.bufsize: # too large to be a string in memory
+                bs = self.bufsize
+                btr = _l
+                stdin = tempfile.TemporaryFile()
+                while btr >= bs:
+                    stdin.write(_i.read(bs))
+                    btr -= bs
+                stdin.write(_i.read(btr))
+                stdin.flush()
+                stdin.seek(0)
+            else: # between zero and max memory buffer size = string or bytes
+                stdin = _i.read(_l)
 
         stdout, stderr, exit_code = self.get_command_output(
             r'git %s --stateless-rpc "%s"' % (git_command[4:], repo_path)
@@ -658,11 +651,6 @@ class GitHTTPBackendSmartHTTP(GitHTTPBackendBase):
             )
         del stdin
         del stderr
-
-        if stdout:
-            print "Length of response is %s" % stdout.tell()
-        else:
-            print "STDOUT is None"
 
         if exit_code: # non-zero value = error
             del stdout
@@ -715,6 +703,10 @@ def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = '', performance_s
         marker_regex = ''
 
     selector.add(
+        marker_regex + r'/showvars',
+        ShowVarsWSGIApp()
+        )
+    selector.add(
         marker_regex + r'(?P<working_path>.*?)/info/refs\?.*?service=(?P<git_command>git-[^&]+).*$',
         GET = git_inforefs_handler,
         HEAD = git_inforefs_handler
@@ -729,6 +721,17 @@ def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = '', performance_s
         HEAD = generic_handler)
 
     return selector
+
+class ShowVarsWSGIApp(object):
+    def __init__(self, *args, **kw):
+        pass
+    def __call__(self, environ, start_response):
+        status = '200 OK'
+        response_headers = [('Content-type','text/plain')]
+        start_response(status, response_headers)
+        for key in sorted(environ.keys()):
+            yield '%s = %s\n' % (key, unicode(environ[key]).encode('utf8'))
+
 
 if __name__ == "__main__":
     _help = r'''

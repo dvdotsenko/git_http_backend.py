@@ -5,6 +5,7 @@ import socket
 import tempfile
 import shutil
 import random
+import time
 try:
     # 3.x style module
     import urllib.request as urlopenlib
@@ -20,7 +21,7 @@ if sys.platform == 'cli':
 else:
     import subprocess
 
-def set_up_server(remote_base_path, threaded = True):
+def set_up_server(remote_base_path):
     # choosing free port
     s = socket.socket()
     s.bind(('',0))
@@ -33,25 +34,7 @@ def set_up_server(remote_base_path, threaded = True):
         (ip, port),
         git_http_backend.assemble_WSGI_git_app(remote_base_path)
         )
-
-    if threaded:
-        def server_runner(s):
-            try:
-                s.start()
-            except:
-                pass
-            finally:
-                s.stop()
-        t = threading.Thread(None, server_runner, None, [server])
-        t.daemon = True
-        t.start()
-    else:
-        try:
-            server.start()
-        except KeyboardInterrupt:
-            pass
-        finally:
-            server.stop()
+    ip = 'localhost' # the IP the socket yields is '0.0.0.0' which is not useful for testing.
     return ip, port, server
 
 def test_smarthttp(url, base_path):
@@ -62,8 +45,8 @@ def test_smarthttp(url, base_path):
     line_one = 'This is a test\n'
     line_two = 'Another line\n'
     file_name = 'testfile.txt'
+    reponame = 'name%sname' % int(time.time())
     large_file_name = 'largetestfile.bin'
-    ip = 'localhost'
     # create local repo
     print("== creating first local repo and adding content ==")
     os.mkdir(repo_one_path)
@@ -74,11 +57,11 @@ def test_smarthttp(url, base_path):
     f.close()
     subprocess.call('git add %s' % file_name)
     subprocess.call('git commit -m "Initial import"')
-    subprocess.call('git push http://%s/centralrepo master' % url)
+    subprocess.call('git push http://%s/%s master' % (url, reponame))
     os.chdir('..')
     # second local repo
     print("== cloning to second local repo and verifying content, adding more ==")
-    subprocess.call('git clone http://%s/centralrepo repotwo' % url)
+    subprocess.call('git clone http://%s/%s repotwo' % (url,reponame))
     assert(os.path.isdir(repo_two_path))
     os.chdir(repo_two_path)
     assert(file_name in os.listdir('.'))
@@ -102,22 +85,43 @@ def test_smarthttp(url, base_path):
     # back to original local repo
     print("== pulling to first local repo and verifying added content ==")
     os.chdir(repo_one_path)
-    subprocess.call('git pull http://%s/centralrepo master' % url)
+    subprocess.call('git pull http://%s/%s master' % (url,reponame))
     assert(set([file_name,large_file_name]).issubset(os.listdir('.')))
     assert(set([line_one,line_two]).issubset(open(file_name).readlines()))
     print("=============\n== SUCCESS ==\n=============\n")
 
+def server_runner(s):
+    try:
+        s.start()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        s.stop()
+
 def server_and_client(base_path):
     remote_base_path = os.path.join(base_path, 'reporemote')
-    ip, port, server = set_up_server(remote_base_path, True)
-    test_smarthttp('%s:%s' % (ip, port), base_path)
-    server.stop()
-    shutil.rmtree(base_path, True)
+    ip, port, server = set_up_server(remote_base_path)    
+    t = threading.Thread(None, server_runner, None, [server])
+    t.daemon = True
+    t.start()
+    try:
+        test_smarthttp('%s:%s' % (ip, port), base_path)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.stop()
+        shutil.rmtree(base_path, True)
 
 def server_only(base_path):
     remote_base_path = os.path.join(base_path, 'reporemote')
-    ip, port, server = set_up_server(remote_base_path, False)
-    shutil.rmtree(base_path, True)
+    ip, port, server = set_up_server(remote_base_path)
+    try:
+        server.start()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.stop()
+        shutil.rmtree(base_path, True)
 
 def client_only(base_path, url):
     try:
