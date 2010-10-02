@@ -1,15 +1,23 @@
-This project's code is designed to fulfill several deployment scenarios. These are:
+This project's code is designed to fulfill several deployment scenarios. 
+These are *some* of the targeted scenarios:
 
-- command-line execution in a running console.
+- command-line execution (blocks console until keyboard interrupt)
 - Deployment with various WSGI servers like:
 	- Cherrypy, WSGI mode.
 	- Apache mod_WSGI (*nix, Windows)
 	- Microsoft IIS 6,7.x (ISAPI_WSGI + cPython, NWSGI + IronPython)
 
-See individual folders for deployment instructions.
+See individual folders under EXAMPLES folder for deployment instructions.
 
-One general note:
-This project uses git submodules. If you pull this project with git, 
+General notes:
+1. This project uses git submodules. If you pull this project with git, 
 please, ensure that after you do the 'git clone' you do:
  git submodule init
  git submodule update
+ 
+2. This project relies on a git executable to be present and visible on the path.
+There is no way to tell the server the path to git executable.
+Please, ensure that running "git" in the console produces git executable output. 
+On *nix-like systems, installing git package usually exposes that by default.
+On Windows, you have choice - cygwin or MSysGit. I prefer cygwin. Either way,
+make sure to add git.exe's folder to the PATH list.

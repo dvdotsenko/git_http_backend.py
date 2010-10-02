@@ -1,29 +1,16 @@
 Summary:
 git_http_backend.py - is both, a Python module and an executable. When ran
-on a command line, it starts Python's built-in WSGIREF server and runs
-against it.
-The simplest way to run the server is to "double-click" on that py file
-in your file browser. See output of "--help" for options.
-
-WARNING:
-Originally the project was seriously targeting the built-in wsgiref
-server that is shipped with cPython. As discovered later, git client's
-Smart HTTP code forces the use of HTTP/1.1 + Transfer encoding: chunked
-on packs larger than 1Mb. WSGIREF does NOT support chunked HTTP request
-bodies. This effectively preculdes the use of WSGIREF server for any
-real deployments. However, for presentations and light file versioning
-running against WSGIREF should suffice. When the 1Mb pack cap is hit, and 
-git client switches to Transfer-Encoding: chunked, this server will
-emit 501 - "Not implemented" error, so the client will know it failed.
-The issue only affects PUSH functionality. PULL is unaffected regardless
-of size of the pack.
+on a command line, it starts ChrryPy's WSGI server packaged together with
+this git server and runs against it.
+The simplest way to run the server is to "double-click" on 
+git_http_backend.py file in your file browser. 
+See output of "--help" for options.
 
 Installation and running instructions:
 
-Versions above 1.0 of this project rely on custom subprocess.py module
-for processing git command output and requires having it around as a 
-module. That dependency is fulfilled through a separate git submodule.
-Don't forget to "git submodule init" , "git submodule update"
+Versions above 1.0 of this project rely on modules several Python modules. 
+We use git submodules to pull those Python modules' files into our project
+tree. Don't forget to "git submodule init" , "git submodule update"
 
 1. Check out latest git_http_backend.py repo:
 	git clone git://github.com/dvdotsenko/git_http_backend.py.git ghbpy
@@ -33,3 +20,5 @@ Don't forget to "git submodule init" , "git submodule update"
 2. Run the script with "--help" option to see the list of options and examples.
 	git_http_backend.py --help
 3. Run the same script with chosen options (or without any) to run the server.
+	mkdir c:\temp\repo_folders_go_here
+	git_http_backend.py --path_prefix c:\temp\repo_folders_go_here

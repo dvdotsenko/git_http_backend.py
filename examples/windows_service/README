@@ -1,0 +1,76 @@
+Summary:
+git_http_backend.py - is not a real web server. It's a WSGI-compatible
+component for an WSGI-compatible web server. Thus, when we run this
+Git_Http_Backend (aka Git Smart HTTP server), what you actually do is
+run some other web server that serves this code as a web application.
+
+The installation is almost as easy as double-click.
+
+Installation and running instructions:
+
+1. Get:
+Versions above 1.0 of this project rely on modules several Python modules. 
+We use git submodules to pull those Python modules' files into our project
+tree. Don't forget to "git submodule init" , "git submodule update"
+
+Check out latest git_http_backend.py repo to a place where you would
+normally keep binaries (c:\bin\,  c:\program files\ etc):
+	git clone git://github.com/dvdotsenko/git_http_backend.py.git ghbpy
+	git submodule init
+	git submodule update
+	cd ghbpy
+
+You can skip this next step and play around with sys.path in the file, but
+moving the file is easier.
+Move file git_http_backend_winservice.py from .\examples\windows_service
+two levels up, to the same folder where git_http_backend.py is located.
+    move .\examples\windows_service\git_http_backend_winservice.py .
+
+2. Configure:
+Look into git_http_backend_winservice.py and read the notations on the 
+server variables. 
+If you don't change anything, the server will run with --port 8888 
+--repo_uri_marker = "" --path_prefix = some randomly chosen temp dir.
+When service shuts down, the temp dir will be removed.
+
+This is good for ad hoc and testing needs, but you'll probably need 
+a more stable set up, so go and change _path_prefix to some real, 
+writable path. Changing rest is purely optional.
+
+3. Install Service:
+To run this code as a "Windows Service" you could run any WSGI-compatible
+web server as a service and slap this WSGI application on top. However,
+since we ship one such WSGI server with us - CherryPy WSGI Server - 
+we will run that - CherryPy WSGI Server - as a service and configure it
+to run us as the single WSGI application.
+
+All of the above - the setting up of CherryPy WSGI Server, the configuring
+or CherryPy WSGI server to server Git_HTTP_Backend as an application - 
+is accomplished with one command on a command promt:
+    git_http_backend_winservice.py install
+
+Note, windows may complain about "Authorization denied" This means you
+need to run the mentioned script as an Administrator. Choose your preferred
+"run as Administrator" way, but mine is to run it in Admin level console:
+    Windows key > "cmd" > CTRL + SHIFT + ENTER
+
+4. Run:
+The service will be installed, but NOT started. (It's set to "Manual" start
+policy by default). So, after installing, go to the usual "Services" 
+windows and start a service whose name starts with "Git Smart HTTP Server"
+or do this in the same console:
+    git_http_backend_winservice.py start
+
+The name of the service as it appears in "Services" list gives some tips
+about the settings chosen for the server.
+
+5. Test:
+If you did not play with the settings in step 2, you can test it out by running 
+    test_git_http_backend.py --client 127.0.0.1:8888
+
+If you did not play with the settings in step 2, you can push new repos to
+the URI http://localhost:8888/ like so (in the folder of any local git repo):
+    git push http://localhost:8888/mynewrepo.git master
+( Note 1: mynewrepo.git folder will be automatically created on the server
+  Note 2: you don't need ".git" at all in the name of the folder, but all 
+          the cool kids are doing it)
