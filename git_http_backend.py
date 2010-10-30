@@ -387,7 +387,12 @@ class GitHTTPBackendBase(BaseWSGIClass):
         '''
         _o = stdout or subprocess.PIPE
         _e = stderr or subprocess.PIPE
-        _p = subprocess.PopenIO(cmd, bufsize = -1, stdin = subprocess.PIPE, stdout = _o, stderr = _e)
+        _p = subprocess.PopenIO(cmd,
+            bufsize = -1,
+            shell = True,
+            stdin = subprocess.PIPE,
+            stdout = _o,
+            stderr = _e)
         o, e = _p.communicateIO(stdin)
         # the "or" magic may need to be explained:
         # depending on the non-None-ness of std* aargs, outputs may be None even
@@ -463,7 +468,7 @@ class GitHTTPBackendBase(BaseWSGIClass):
                         break
                     elif not os.path.isdir(_pf) or self.git_folder_signature.issubset([i.lower() for i in os.listdir(_pf)]):
                         return self.canned_handlers(environ, start_response, 'forbidden')
-                if subprocess.call('git init --quiet --bare "%s"' % repo_path):
+                if subprocess.call('git init --quiet --bare "%s"' % repo_path, shell=True):
                     return self.canned_handlers(environ, start_response, 'execution_failed')
         #
         #############################################################
@@ -657,7 +662,7 @@ class GitHTTPBackendSmartHTTP(GitHTTPBackendBase):
             return self.canned_handlers(environ, start_response, 'execution_failed')
         elif git_command in [u'git-receive-pack']:
             # updating refs manually after each push. Needed for pre-1.7.0.4 git clients using regular HTTP mode.
-            subprocess.call(u'git --git-dir "%s" update-server-info' % repo_path)
+            subprocess.call(u'git --git-dir "%s" update-server-info' % repo_path, shell=True)
 
         headers = [('Content-type', 'application/x-%s-result' % git_command.encode('utf8'))]
         return self.package_response(stdout, environ, start_response, headers)
