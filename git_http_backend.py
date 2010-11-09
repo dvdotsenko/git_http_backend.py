@@ -216,15 +216,8 @@ class WSGIHandlerSelector(BaseWSGIClass):
         environ['wsgiorg.routing_args'] per
         http://www.wsgi.org/wsgi/Specifications/routing_args
         """
-
-        class default_retriever(object):
-            def __init__(self,obj):
-                self.obj = obj
-            def __call__(self):
-                return self.obj
-
         if default_handler:
-            methods = defaultdict(default_retriever(default_handler), http_methods.copy())
+            methods = defaultdict(lambda: default_handler, http_methods.copy())
         else:
             methods = http_methods.copy()
         self.mappings.append((re.compile(path.decode('utf8')), methods, (path.find(r'\?')>-1) ))
