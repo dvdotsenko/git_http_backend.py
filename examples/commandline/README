@@ -21,4 +21,4 @@ tree. Don't forget to "git submodule init" , "git submodule update"
 	git_http_backend.py --help
 3. Run the same script with chosen options (or without any) to run the server.
 	mkdir c:\temp\repo_folders_go_here
-	git_http_backend.py --path_prefix c:\temp\repo_folders_go_here
+	git_http_backend.py --content_path c:\temp\repo_folders_go_here

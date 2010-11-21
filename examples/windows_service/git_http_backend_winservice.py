@@ -45,19 +45,19 @@ class GitSmartHTTPServer(win32serviceutil.ServiceFramework):
     _server_port = 8888
     '''The port on which this Git Smart HTTP server will listen on'''
 
-    _path_prefix = "CHANGE ME!"
+    _content_path = "CHANGE ME!"
     '''This is the "start" of the physical path that will be exposed as
     the root folder for all repo folder references.
 
     If you already have a folder on your drive that has all the repo folders,
     this (or some folder above it) is the the folder you would like to 
-    set the _path_prefix to.
+    set the _content_path to.
 
     You need to escape backslashes or use Python's "r" marker to declare 
     "read this string liteterally". Examples: "c:\\temp" , r"c:\temp"
 
     Example:
-        if _path_prefix = c:\our_repos_root
+        if _content_path = c:\our_repos_root
         URI http://server:port/userjoe/joes_repo_one.git
         Would mean to reference an actual folder:
             c:\our_repos_root\userjoe\joes_repo_one.git
@@ -66,7 +66,7 @@ class GitSmartHTTPServer(win32serviceutil.ServiceFramework):
     temp folder of our choice and removing all repos when service stops.
     '''
 
-    _repo_uri_marker = "" # Example: "myprojects"
+    _uri_marker = "" # Example: "myprojects"
     '''This is a label that server will look for in the URI to determine
     which portion of the URI refers to the start of actual repo folder structures.
 
@@ -74,16 +74,16 @@ class GitSmartHTTPServer(win32serviceutil.ServiceFramework):
     to the git server "after this, the remaining URI is what you have to care about"
 
     If this arg is not set, server assumes that the name of the physical path
-    to repo folder relative to _path_prefix starts immediately after first slash.
+    to repo folder relative to _content_path starts immediately after first slash.
     Example:
-        if _path_prefix = c:\tmp\our_repos_root
+        if _content_path = c:\tmp\our_repos_root
         URI http://server:port/userjoe/joes_repo_one.git
         Would mean to reference an actual phisical folder:
             c:\tmp\our_repos_root\userjoe\joes_repo_one.git
 
     URI marker is useful in specific cases when it's important to have the git
     server host the app on a non-root folder.
-    (Example, _repo_uri_marker was set to "myrepos" vs. "":
+    (Example, _uri_marker was set to "myrepos" vs. "":
         http://server/any/random/pre-path/here/myrepos/repofoler.git
         vs. http://server/repofoler.git)
 
@@ -100,14 +100,14 @@ class GitSmartHTTPServer(win32serviceutil.ServiceFramework):
     before going production.
     '''
 
-    if not _path_prefix or _path_prefix == "CHANGE ME!":
-        _path_prefix = tempfile.mkdtemp()
+    if not _content_path or _content_path == "CHANGE ME!":
+        _content_path = tempfile.mkdtemp()
         _using_temporary_folder = ', repo dir will self-destruct'
     else:
         _using_temporary_folder = ''
 
-    if _repo_uri_marker:
-        _s = ', URI marker "/%s/"' % _repo_uri_marker
+    if _uri_marker:
+        _s = ', URI marker "/%s/"' % _uri_marker
     else:
         _s = ', no URI marker'
     _svc_display_name_ = "Git Smart HTTP Server - port %s%s%s." % (
@@ -118,13 +118,11 @@ class GitSmartHTTPServer(win32serviceutil.ServiceFramework):
     def SvcDoRun(self):
 
         app = git_http_backend.assemble_WSGI_git_app(
-            path_prefix = self._path_prefix,
-            repo_uri_marker = self._repo_uri_marker
+            content_path = self._content_path,
+            uri_marker = self._uri_marker
             # on push, nonexistent repos are autocreated by default.
             # uncomment 3 lines below to stop that.
-#            , performance_settings = {
-#                'repo_auto_create':False
-#                }
+#            ,repo_auto_create = False
         )
         self._server_instance = wsgiserver.CherryPyWSGIServer(
                 (self._server_ip, self._server_port),
@@ -144,7 +142,7 @@ class GitSmartHTTPServer(win32serviceutil.ServiceFramework):
         if self._server_instance:
             self._server_instance.stop()
         if self._using_temporary_folder:
-            shutil.rmtree(self._path_prefix, True)
+            shutil.rmtree(self._content_path, True)
         self.ReportServiceStatus(win32service.SERVICE_STOPPED)
         # very important for use with py2exe
         # otherwise the Service Controller never knows that it is stopped !

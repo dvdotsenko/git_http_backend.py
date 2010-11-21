@@ -30,11 +30,11 @@ two levels up, to the same folder where git_http_backend.py is located.
 Look into git_http_backend_winservice.py and read the notations on the 
 server variables. 
 If you don't change anything, the server will run with --port 8888 
---repo_uri_marker = "" --path_prefix = some randomly chosen temp dir.
+--_uri_marker = "" --content_path = some randomly chosen temp dir.
 When service shuts down, the temp dir will be removed.
 
 This is good for ad hoc and testing needs, but you'll probably need 
-a more stable set up, so go and change _path_prefix to some real, 
+a more stable set up, so go and change _content_path to some real, 
 writable path. Changing rest is purely optional.
 
 3. Install Service:

@@ -300,7 +300,7 @@ class StaticWSGIServer(BaseWSGIClass):
     def __init__(self, **kw):
         '''
         Inputs:
-            path_prefix (mandatory)
+            content_path (mandatory)
                 String containing a file-system level path behaving as served root.
 
             bufsize (optional)
@@ -323,8 +323,8 @@ class StaticWSGIServer(BaseWSGIClass):
             path_info = environ.get('PATH_INFO', '').decode('utf8')
 
         # this, i hope, safely turns the relative path into OS-specific, absolute.
-        full_path = os.path.abspath(os.path.join(self.path_prefix, path_info.strip('/')))
-        _pp = os.path.abspath(self.path_prefix)
+        full_path = os.path.abspath(os.path.join(self.content_path, path_info.strip('/')))
+        _pp = os.path.abspath(self.content_path)
 
         if not full_path.startswith(_pp):
             return self.canned_handlers(environ, start_response, 'forbidden')
@@ -420,11 +420,11 @@ class GitHTTPBackendBase(BaseWSGIClass):
         #
         repo_path = os.path.abspath(
             os.path.join(
-                self.path_prefix,
+                self.content_path,
                 (selector_matches.get('working_path') or '').decode('utf8').strip('/').strip('\\')
                 )
             )
-        _pp = os.path.abspath(self.path_prefix)
+        _pp = os.path.abspath(self.content_path)
 
         # this saves us from "hackers" putting relative paths after repo marker.
         if not repo_path.startswith(_pp):
@@ -483,7 +483,7 @@ class GitHTTPBackendInfoRefs(GitHTTPBackendBase):
     def __init__(self, **kw):
         '''
         inputs:
-            path_prefix (Mandatory) - Local file system path = root of served files.
+            content_path (Mandatory) - Local file system path = root of served files.
             bufsize (Default = 65536) Chunk size for WSGI file feeding
             gzip_response (Default = False) Compress response body
         '''
@@ -539,7 +539,7 @@ class GitHTTPBackendSmartHTTP(GitHTTPBackendBase):
     '''
     def __init__(self, **kw):
         '''
-        path_prefix
+        content_path
             Local file system path = root of served files.
         optional parameters may be passed as named arguments
             These include
@@ -660,50 +660,55 @@ class GitHTTPBackendSmartHTTP(GitHTTPBackendBase):
         headers = [('Content-type', 'application/x-%s-result' % git_command.encode('utf8'))]
         return self.package_response(stdout, environ, start_response, headers)
 
-def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = '', performance_settings = {}):
+def assemble_WSGI_git_app(*args, **kw):
     '''
     Assembles basic WSGI-compatible application providing functionality of git-http-backend.
 
-    path_prefix (Defaults to '.' = "current" directory)
+    content_path (Defaults to '.' = "current" directory)
         The path to the folder that will be the root of served files. Accepts relative paths.
 
-    repo_uri_marker (Defaults to '')
+    uri_marker (Defaults to '')
         Acts as a "virtual folder" separator between decorative URI portion and
-        the actual (relative to path_prefix) path that will be appended to
-        path_prefix and used for pulling an actual file.
+        the actual (relative to content_path) path that will be appended to
+        content_path and used for pulling an actual file.
 
-        the URI does not have to start with contents of repo_uri_marker. It can
-        be preceeded by any number of "virtual" folders. For --repo_uri_marker 'my'
+        the URI does not have to start with contents of uri_marker. It can
+        be preceeded by any number of "virtual" folders. For --uri_marker 'my'
         all of these will take you to the same repo:
             http://localhost/my/HEAD
             http://localhost/admysf/mylar/zxmy/my/HEAD
         This WSGI hanlder will cut and rebase the URI when it's time to read from file system.
 
         Default of '' means that no cutting marker is used, and whole URI after FQDN is
-        used to find file relative to path_prefix.
+        used to find file relative to content_path.
 
     returns WSGI application instance.
     '''
 
-    repo_uri_marker = repo_uri_marker.decode('utf8')
-    path_prefix = path_prefix.decode('utf8')
-    settings = {"path_prefix": path_prefix.decode('utf8')}
-    settings.update(performance_settings)
+    default_options = [
+        ['content_path','.'],
+        ['uri_marker','']
+    ]
+    args = list(args)
+    options = dict(default_options)
+    options.update(kw)
+    while default_options and args:
+        _d = default_options.pop(0)
+        _a = args.pop(0)
+        options[_d[0]] = _a
+    options['content_path'] = os.path.abspath(options['content_path'].decode('utf8'))
+    options['uri_marker'] = options['uri_marker'].decode('utf8')
 
     selector = WSGIHandlerSelector()
-    generic_handler = StaticWSGIServer(**settings)
-    git_inforefs_handler = GitHTTPBackendInfoRefs(**settings)
-    git_rpc_handler = GitHTTPBackendSmartHTTP(**settings)
+    generic_handler = StaticWSGIServer(**options)
+    git_inforefs_handler = GitHTTPBackendInfoRefs(**options)
+    git_rpc_handler = GitHTTPBackendSmartHTTP(**options)
 
-    if repo_uri_marker:
-        marker_regex = r'(?P<decorative_path>.*?)(?:/'+ repo_uri_marker + ')'
+    if options['uri_marker']:
+        marker_regex = r'(?P<decorative_path>.*?)(?:/'+ options['uri_marker'] + ')'
     else:
         marker_regex = ''
 
-#    selector.add(
-#        marker_regex + r'/showvars',
-#        ShowVarsWSGIApp()
-#        )
     selector.add(
         marker_regex + r'(?P<working_path>.*?)/info/refs\?.*?service=(?P<git_command>git-[^&]+).*$',
         GET = git_inforefs_handler,
@@ -712,7 +717,7 @@ def assemble_WSGI_git_app(path_prefix = '.', repo_uri_marker = '', performance_s
     selector.add(
         marker_regex + r'(?P<working_path>.*)/(?P<git_command>git-[^/]+)$',
         POST = git_rpc_handler
-        ) # warning: this regex is "greedy" it will skip all cases of /git- until it finds last one.
+        )
     selector.add(
         marker_regex + r'(?P<working_path>.*)$',
         GET = generic_handler,
@@ -747,28 +752,28 @@ You can name bare repo folders whatever you like. If the signature (right files
 and folders are found inside) matches a typical git repo, it's a "repo."
 
 Options:
---path_prefix (Defaults to '.' - current directory)
+--content_path (Defaults to '.' - current directory)
 	Serving contents of folder path passed in. Accepts relative paths,
 	including things like "./../" and resolves them agains current path.
 
 	If you set this to actual .git folder, you don't need to specify the
 	folder's name on URI.
 
---repo_uri_marker (Defaults to '')
+--uri_marker (Defaults to '')
 	Acts as a "virtual folder" - separator between decorative URI portion
-	and the actual (relative to path_prefix) path that will be appended
-	to path_prefix and used for pulling an actual file.
+	and the actual (relative to content_path) path that will be appended
+	to content_path and used for pulling an actual file.
 
-	the URI does not have to start with contents of repo_uri_marker. It can
+	the URI does not have to start with contents of uri_marker. It can
 	be preceeded by any number of "virtual" folders.
-	For --repo_uri_marker 'my' all of these will take you to the same repo:
+	For --uri_marker 'my' all of these will take you to the same repo:
 		http://localhost/my/HEAD
 		http://localhost/admysf/mylar/zxmy/my/HEAD
 	If you are using reverse proxy server, pick the virtual, decorative URI
 	prefix / path of your choice. This hanlder will cut and rebase the URI.
 
 	Default of '' means that no cutting marker is used, and whole URI after
-	FQDN is used to find file relative to path_prefix.
+	FQDN is used to find file relative to content_path.
 
 --port (Defaults to 8080)
 
@@ -787,14 +792,14 @@ c:\tools\git_http_backend\GitHttpBackend.py
 	become available as:
 	 http://localhost:8080/repo1.git  and  http://localhost:8080/repo2.git
 
-~/myscripts/GitHttpBackend.py --path_prefix "~/somepath/repofolder" --repo_uri_marker "myrepo"
+~/myscripts/GitHttpBackend.py --content_path "~/somepath/repofolder" --uri_marker "myrepo"
 	Will serve chosen repo folder as http://localhost/myrepo/ or
 	http://localhost:8080/does/not/matter/what/you/type/here/myrepo/
 	This "repo uri marker" is useful for making a repo server appear as a
 	part of some REST web application or make it appear as a part of server
 	while serving it from behind a reverse proxy.
 
-./GitHttpBackend.py --path_prefix ".." --port 80
+./GitHttpBackend.py --content_path ".." --port 80
 	Will serve the folder above the "git_http_backend" (in which 
 	GitHttpBackend.py happened to be located.) A functional url could be
 	 http://localhost/git_http_backend/GitHttpBackend.py
@@ -806,8 +811,8 @@ c:\tools\git_http_backend\GitHttpBackend.py
     import sys
 
     command_options = {
-            'path_prefix' : '.',
-            'repo_uri_marker' : '',
+            'content_path' : '.',
+            'uri_marker' : '',
             'port' : '8080'
         }
     lastKey = None
@@ -819,14 +824,14 @@ c:\tools\git_http_backend\GitHttpBackend.py
             command_options[lastKey] = item.strip('"').strip("'")
             lastKey = None
 
-    path_prefix = os.path.abspath( command_options['path_prefix'] )
+    content_path = os.path.abspath( command_options['content_path'] )
 
     if 'help' in command_options:
         print _help
     else:
         app = assemble_WSGI_git_app(
-            path_prefix = path_prefix,
-            repo_uri_marker = command_options['repo_uri_marker'],
+            content_path = content_path,
+            uri_marker = command_options['uri_marker'],
             performance_settings = {
                 'repo_auto_create':True
                 }
@@ -836,13 +841,13 @@ c:\tools\git_http_backend\GitHttpBackend.py
         from cherrypy import wsgiserver
         httpd = wsgiserver.CherryPyWSGIServer(('0.0.0.0',int(command_options['port'])),app)
 
-        if command_options['repo_uri_marker']:
-            _s = '"/%s/".' % command_options['repo_uri_marker']
+        if command_options['uri_marker']:
+            _s = '"/%s/".' % command_options['uri_marker']
             example_URI = '''http://localhost:%s/whatever/you/want/here/%s/myrepo.git
     (Note: "whatever/you/want/here" cannot include the "/%s/" segment)''' % (
             command_options['port'],
-            command_options['repo_uri_marker'],
-            command_options['repo_uri_marker'])
+            command_options['uri_marker'],
+            command_options['uri_marker'])
         else:
             _s = 'not chosen.'
             example_URI = 'http://localhost:%s/myrepo.git' % (command_options['port'])
@@ -860,7 +865,7 @@ Example repo url would be:
 
 Use Keyboard Interrupt key combination (usually CTRL+C) to stop the server
 ===========================================================================
-''' % (command_options['port'], path_prefix, _s, example_URI)
+''' % (command_options['port'], content_path, _s, example_URI)
 
         try:
             httpd.start()
