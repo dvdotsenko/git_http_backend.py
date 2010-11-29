@@ -340,6 +340,8 @@ class StaticWSGIServer(BaseWSGIClass):
             ('ETag', etag)
         ]
         headersIface = Headers(headers)
+        headersIface['Content-Type'] = mimetypes.guess_type(full_path)[0] or 'application/octet-stream'
+
         if_modified = environ.get('HTTP_IF_MODIFIED_SINCE')
         if if_modified and (email.utils.parsedate(if_modified) >= email.utils.parsedate(last_modified)):
             return self.canned_handlers(environ, start_response, 'not_modified', headers)
@@ -347,7 +349,6 @@ class StaticWSGIServer(BaseWSGIClass):
         if if_none and (if_none == '*' or etag in if_none):
             return self.canned_handlers(environ, start_response, 'not_modified', headers)
 
-        headersIface['Content-Type'] = mimetypes.guess_type(full_path)[0] or 'application/octet-stream'
         file_like = open(full_path, 'rb')
         return self.package_response(file_like, environ, start_response, headers)
 
