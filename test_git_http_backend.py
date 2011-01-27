@@ -14,7 +14,7 @@ except:
     import urllib as urlopenlib
 
 import git_http_backend
-from cherrypy import wsgiserver
+import cherrypy as wsgiserver
 
 if sys.platform == 'cli':
     import subprocessio.subprocessio_ironpython as subprocess

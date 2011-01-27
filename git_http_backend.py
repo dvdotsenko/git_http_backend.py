@@ -839,7 +839,7 @@ c:\tools\git_http_backend\GitHttpBackend.py
         )
 
         # default Python's WSGI server. Replace with your choice of WSGI server
-        from cherrypy import wsgiserver
+        import cherrypy as wsgiserver
         httpd = wsgiserver.CherryPyWSGIServer(('0.0.0.0',int(command_options['port'])),app)
 
         if command_options['uri_marker']:

@@ -30,7 +30,7 @@ import os
 sys.path.append(os.path.abspath("."))
 
 import git_http_backend
-from cherrypy import wsgiserver
+import cherrypy as wsgiserver
 
 class GitSmartHTTPServer(win32serviceutil.ServiceFramework):
 # class GitSmartHTTPServer(object):
