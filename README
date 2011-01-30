@@ -49,7 +49,7 @@ Grack's Ruby code.
 
 Dependencies
 ========================
-* Python 2.6 (Developed against 2.6, 2.5+ might work, but never tested.)
+* Python 2.6.x, 2.7.x (3.x is very likely NOT to work.)
 * Git >= 1.6.6 (On the server and on the client side.)
 
 Installation
