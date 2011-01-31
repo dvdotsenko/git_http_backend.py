@@ -1,6 +1,3 @@
-[submodule "subprocessio"]
-	path = subprocessio
-	url = git://github.com/dvdotsenko/IronPythonParts.git
 [submodule "cherrypy"]
 	path = cherrypy
 	url = git://gitorious.org/cherrypy_wsgiserver/cherrypy_wsgiserver.git
