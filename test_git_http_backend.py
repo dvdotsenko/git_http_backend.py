@@ -16,10 +16,7 @@ except:
 import git_http_backend
 import cherrypy as wsgiserver
 
-if sys.platform == 'cli':
-    import subprocessio.subprocessio_ironpython as subprocess
-else:
-    import subprocess
+import subprocess
 
 def set_up_server(remote_base_path):
     # choosing free port

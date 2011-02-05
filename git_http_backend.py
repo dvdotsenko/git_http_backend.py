@@ -29,19 +29,8 @@ import io
 import os
 import sys
 
-# we are using a custom version of subprocess.Popen - PopenIO 
-# with communicateIO() method that starts reading into mem
-# and switches to hard-drive persistence after mem threshold is crossed.
-if sys.platform == 'cli':
-    import subprocessio.subprocessio_ironpython as subprocess
-else:
-    import subprocess
-
-try:
-    # will fail on cPython
-    t = subprocess.PopenIO
-except:
-    import subprocessio.subprocessio as subprocess
+import subprocess
+import subprocessio
 
 import tempfile
 from wsgiref.headers import Headers
@@ -109,14 +98,14 @@ class BaseWSGIClass(object):
         for header in newheaders:
             headersIface[header[0]] = '; '.join(header[1:])
 
-        retobj = outIO
         if hasattr(outIO,'fileno') and 'wsgi.file_wrapper' in environ:
             outIO.seek(0)
             retobj = environ['wsgi.file_wrapper']( outIO, self.bufsize )
-        # TODO: I think this does not work well on NWSGI 2.0. Talk to Jeff about this for 3.0
         elif hasattr(outIO,'read'):
             outIO.seek(0)
             retobj = iter( lambda: outIO.read(self.bufsize), '' )
+        else:
+            retobj = outIO
         start_response("200 OK", headers)
         return retobj
 
@@ -365,37 +354,6 @@ class GitHTTPBackendBase(BaseWSGIClass):
         '''
         return True
 
-    def get_command_output(self, cmd,
-            stdin = None,
-            stdout = None,
-            stderr = None
-            ):
-        '''
-        command_output(cmd,stdin,stdout,stderr)
-
-        stdin,stdout,stderr (optional)
-         FileIO-like, fd's or in case of stdin, string objects.
-
-        Returns None or File-Like out and error objects,
-        and int return code as a tuple: (out, error, return_code)
-        '''
-        _o = stdout or subprocess.PIPE
-        _e = stderr or subprocess.PIPE
-        _p = subprocess.PopenIO(cmd,
-            bufsize = -1,
-            shell = True,
-            stdin = subprocess.PIPE,
-            stdout = _o,
-            stderr = _e)
-        o, e = _p.communicateIO(stdin)
-        # the "or" magic may need to be explained:
-        # depending on the non-None-ness of std* aargs, outputs may be None even
-        # if there was some output of that type. These could have been diverted
-        # to stdout, stderr. If e or o are non-None, they are, for sure IO-likes
-        # else, stdout and stderr are for sure IO-likes, file-descriptor or None.
-        # as a result, each of out, error returned elems could be: None, fd, or file-like.
-        return o or stdout, e or stderr, _p.returncode
-
     def basic_checks(self, dataObj, environ, start_response):
         '''
         This function is shared by GitInfoRefs and SmartHTTPRPCHandler WSGI classes.
@@ -508,18 +466,20 @@ class GitHTTPBackendInfoRefs(GitHTTPBackendBase):
         # It reads binary, per number of bytes specified.
         # if you do add '\n' as part of data, count it.
         smart_server_advert = '# service=%s' % git_command
-        out = [ str(hex(len(smart_server_advert)+4)[2:].rjust(4,'0') + smart_server_advert + '0000') ]
-        stdout, stderr, exit_code = self.get_command_output(
-                r'git %s --stateless-rpc --advertise-refs "%s"' % (git_command[4:], repo_path)
+
+        try:
+            out = subprocessio.SubprocessIOChunker(
+                r'git %s --stateless-rpc --advertise-refs "%s"' % (git_command[4:], repo_path),
+                starting_values = [ str(hex(len(smart_server_advert)+4)[2:].rjust(4,'0') + smart_server_advert + '0000') ]
                 )
-        headers = [('Content-type','application/x-%s-advertisement' % str(git_command))]
-        if exit_code: # non-zero value = error
+        except (EnvironmentError) as e:
+            environ['wsgi.errors'].write(str(e))
             return self.canned_handlers(environ, start_response, 'execution_failed')
-        if stdout:
-            stdout.seek(0)
-            out.append(str(stdout.read()))
-        del stdout
-        del stderr
+#        except Exception as e:
+#            environ['wsgi.errors'].write(str(e))
+#            return self.canned_handlers(environ, start_response, 'internal_server_error')
+
+        headers = [('Content-type','application/x-%s-advertisement' % str(git_command))]
         return self.package_response(
             out,
             environ,
@@ -644,22 +604,25 @@ class GitHTTPBackendSmartHTTP(GitHTTPBackendBase):
             else: # between zero and max memory buffer size = string or bytes
                 stdin = _i.read(_l)
 
-        stdout, stderr, exit_code = self.get_command_output(
-            r'git %s --stateless-rpc "%s"' % (git_command[4:], repo_path)
-            , stdin = stdin
-            )
-        del stdin
-        del stderr
-
-        if exit_code: # non-zero value = error
-            del stdout
+        try:
+            out = subprocessio.SubprocessIOChunker(
+                r'git %s --stateless-rpc "%s"' % (git_command[4:], repo_path),
+                inputstream = stdin
+                )
+        except (EnvironmentError) as e:
+            environ['wsgi.errors'].write(str(e))
             return self.canned_handlers(environ, start_response, 'execution_failed')
-        elif git_command in [u'git-receive-pack']:
+
+        if git_command == u'git-receive-pack':
             # updating refs manually after each push. Needed for pre-1.7.0.4 git clients using regular HTTP mode.
             subprocess.call(u'git --git-dir "%s" update-server-info' % repo_path, shell=True)
 
         headers = [('Content-type', 'application/x-%s-result' % git_command.encode('utf8'))]
-        return self.package_response(stdout, environ, start_response, headers)
+        return self.package_response(
+            out,
+            environ,
+            start_response,
+            headers)
 
 def assemble_WSGI_git_app(*args, **kw):
     '''
